@@ -174,17 +174,26 @@ async function openModal(
 }
 
 async function fetchAdrPrefill(adrId: string): Promise<Record<string, string>> {
-  const resp = await fetch(
-    `${supabaseUrl}/rest/v1/adrs?id=eq.${encodeURIComponent(adrId)}&select=title,context_text,decision,alternatives,consequences,open_questions,decision_drivers,implementation_plan,reviewers`,
-    {
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/adrs?id=eq.${encodeURIComponent(adrId)}&select=title,context_text,decision,alternatives,consequences,open_questions,decision_drivers,implementation_plan,reviewers`,
+      {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
       },
-    },
-  );
-  const rows = await resp.json();
-  return rows?.[0] ?? {};
+    );
+    if (!resp.ok) {
+      console.error("fetchAdrPrefill failed:", resp.status);
+      return {};
+    }
+    const rows = await resp.json();
+    return rows?.[0] ?? {};
+  } catch (err) {
+    console.error("fetchAdrPrefill error:", err);
+    return {};
+  }
 }
 
 Deno.serve(async (req: Request) => {

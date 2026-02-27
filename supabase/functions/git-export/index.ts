@@ -156,22 +156,42 @@ async function sendCallback(
   data: Record<string, string>,
 ): Promise<void> {
   const payload = JSON.stringify({ adr_id: adrId, status, ...data });
-  const resp = await fetch(
-    `${supabaseUrl}/rest/v1/rpc/handle_git_export_callback`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "x-export-api-key": serviceRoleKey,
-      },
-      body: JSON.stringify({ raw_body: payload }),
-    },
-  );
-  if (!resp.ok) {
-    console.error("Callback failed:", resp.status, await resp.text());
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/handle_git_export_callback`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: serviceRoleKey,
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "x-export-api-key": serviceRoleKey,
+          },
+          body: JSON.stringify({ raw_body: payload }),
+        },
+      );
+      if (resp.ok) return;
+      const errText = await resp.text();
+      console.error(
+        `Callback attempt ${attempt}/${maxRetries} failed:`,
+        resp.status,
+        errText,
+      );
+    } catch (err) {
+      console.error(
+        `Callback attempt ${attempt}/${maxRetries} error:`,
+        err,
+      );
+    }
+    if (attempt < maxRetries) {
+      await new Promise((r) => setTimeout(r, attempt * 1000));
+    }
   }
+  console.error(
+    `Callback for ${adrId} (${status}) failed after ${maxRetries} attempts`,
+  );
 }
 
 Deno.serve(async (req: Request) => {
