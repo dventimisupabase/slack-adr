@@ -239,6 +239,7 @@ ACCEPT_FORM=$(python3 -c "
 import json, urllib.parse
 payload = {
     'type': 'block_actions',
+    'team': {'id': 'T_SMOKE'},
     'user': {'id': 'U_REVIEWER'},
     'actions': [{'action_id': 'accept_adr', 'value': '$ACCEPT_ADR_ID'}],
     'channel': {'id': 'C_SMOKE'},
