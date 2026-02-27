@@ -54,7 +54,9 @@ CREATE OR REPLACE FUNCTION dispatch_side_effects(
 ) RETURNS void AS $$
 DECLARE
   slack_payload jsonb;
+  bk jsonb;
   channel text;
+  thread text;
   markdown text;
 BEGIN
   -- Check outbox suppression
@@ -66,23 +68,33 @@ BEGIN
 
   CASE event_type
     WHEN 'ADR_CREATED' THEN
+      -- Send Block Kit message with action buttons
+      bk := build_adr_block_kit(req, event_type, req.created_by);
       slack_payload := jsonb_build_object(
         'channel', channel,
-        'text', format('*%s: %s*' || E'\n' || 'Status: %s | Created by: <@%s>',
-          req.id, req.title, new_state, req.created_by)
+        'text', format('*%s: %s* — Status: %s', req.id, req.title, new_state)
       );
+      IF bk IS NOT NULL THEN
+        slack_payload := slack_payload || jsonb_build_object('blocks', bk->'blocks');
+      END IF;
       IF req.thread_ts IS NOT NULL THEN
         slack_payload := slack_payload || jsonb_build_object('thread_ts', req.thread_ts);
       END IF;
       PERFORM enqueue_outbox(req.id, NULL, 'slack', slack_payload);
 
     WHEN 'ADR_ACCEPTED', 'ADR_REJECTED', 'ADR_SUPERSEDED' THEN
+      -- Send updated Block Kit on state transitions
+      thread := coalesce(req.slack_message_ts, req.thread_ts);
+      bk := build_adr_block_kit(req, event_type, NULL);
       slack_payload := jsonb_build_object(
         'channel', channel,
         'text', format('*%s* status changed to *%s*', req.id, new_state)
       );
-      IF req.slack_message_ts IS NOT NULL THEN
-        slack_payload := slack_payload || jsonb_build_object('thread_ts', req.slack_message_ts);
+      IF bk IS NOT NULL THEN
+        slack_payload := slack_payload || jsonb_build_object('blocks', bk->'blocks');
+      END IF;
+      IF thread IS NOT NULL THEN
+        slack_payload := slack_payload || jsonb_build_object('thread_ts', thread);
       END IF;
       PERFORM enqueue_outbox(req.id, NULL, 'slack', slack_payload);
 
@@ -97,10 +109,14 @@ BEGIN
 
     WHEN 'EXPORT_COMPLETED' THEN
       IF req.git_pr_url IS NOT NULL THEN
+        bk := build_adr_block_kit(req, event_type, NULL);
         slack_payload := jsonb_build_object(
           'channel', channel,
-          'text', format(':white_check_mark: *%s* exported to Git: %s', req.id, req.git_pr_url)
+          'text', format('*%s* exported to Git: %s', req.id, req.git_pr_url)
         );
+        IF bk IS NOT NULL THEN
+          slack_payload := slack_payload || jsonb_build_object('blocks', bk->'blocks');
+        END IF;
         IF req.slack_message_ts IS NOT NULL THEN
           slack_payload := slack_payload || jsonb_build_object('thread_ts', req.slack_message_ts);
         END IF;

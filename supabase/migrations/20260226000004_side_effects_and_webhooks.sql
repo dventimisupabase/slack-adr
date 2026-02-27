@@ -134,6 +134,7 @@ NOTIFY pgrst, 'reload config';
 
 -- Main Slack webhook handler: receives raw form-encoded body
 CREATE FUNCTION handle_slack_webhook(raw_body text) RETURNS json AS $$
+#variable_conflict use_variable
 DECLARE
   params jsonb;
   sig text;
@@ -188,7 +189,7 @@ BEGIN
     WHEN 'enable' THEN
       INSERT INTO channel_config (team_id, channel_id, enabled)
       VALUES (team_id, channel_id, true)
-      ON CONFLICT (team_id, channel_id)
+      ON CONFLICT ON CONSTRAINT channel_config_pkey
       DO UPDATE SET enabled = true;
 
       RETURN json_build_object(
@@ -205,9 +206,9 @@ BEGIN
       );
 
     WHEN 'disable' THEN
-      UPDATE channel_config SET enabled = false
-      WHERE channel_config.team_id = handle_slack_webhook.team_id
-        AND channel_config.channel_id = handle_slack_webhook.channel_id;
+      UPDATE channel_config cc SET enabled = false
+      WHERE cc.team_id = team_id
+        AND cc.channel_id = channel_id;
 
       RETURN json_build_object(
         'response_type', 'ephemeral',

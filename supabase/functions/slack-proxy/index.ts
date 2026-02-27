@@ -257,11 +257,8 @@ Deno.serve(async (req: Request) => {
               `${supabaseUrl}/rest/v1/rpc/handle_slack_webhook`,
               {
                 method: "POST",
-                headers: {
-                  ...rpcHeaders(req),
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ raw_body: body }),
+                headers: rpcHeaders(req),
+                body, // Raw form-encoded body as text/plain
               },
             );
 

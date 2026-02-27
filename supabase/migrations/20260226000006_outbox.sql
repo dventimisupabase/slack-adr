@@ -157,8 +157,8 @@ BEGIN
         WHERE id = row.id;
 
       ELSIF row.destination = 'git-export' THEN
-        supabase_url := current_setting('app.settings.supabase_url', true);
-        service_key := current_setting('app.settings.service_role_key', true);
+        supabase_url := get_secret('SUPABASE_URL');
+        service_key := get_secret('SUPABASE_SERVICE_ROLE_KEY');
 
         -- Call git-export Edge Function
         IF supabase_url IS NOT NULL AND supabase_url != '' THEN
