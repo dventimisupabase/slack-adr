@@ -1,4 +1,6 @@
-# ADR Canvas Template (Standard)
+# ADR Template (Standard)
+
+This template defines the fields used in the Slack Modal and the final Git export.
 
 ## Title
 Short name for the decision.
