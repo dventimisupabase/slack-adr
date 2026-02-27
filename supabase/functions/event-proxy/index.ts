@@ -25,14 +25,14 @@ Deno.serve(async (req: Request) => {
       {
         method: "POST",
         headers: {
-          "Content-Type": "text/plain",
+          "Content-Type": "application/json",
           apikey: serviceRoleKey,
           Authorization: `Bearer ${serviceRoleKey}`,
-          x_slack_signature: req.headers.get("x-slack-signature") ?? "",
-          x_slack_request_timestamp:
+          "x-slack-signature": req.headers.get("x-slack-signature") ?? "",
+          "x-slack-request-timestamp":
             req.headers.get("x-slack-request-timestamp") ?? "",
         },
-        body,
+        body: JSON.stringify({ raw_body: body }),
       },
     );
 

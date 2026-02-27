@@ -161,11 +161,12 @@ async function sendCallback(
     {
       method: "POST",
       headers: {
-        "Content-Type": "text/plain",
+        "Content-Type": "application/json",
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,
+        "x-export-api-key": serviceRoleKey,
       },
-      body: payload,
+      body: JSON.stringify({ raw_body: payload }),
     },
   );
   if (!resp.ok) {

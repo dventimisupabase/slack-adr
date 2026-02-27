@@ -194,6 +194,7 @@ $$;
 DO $$
 BEGIN
   PERFORM set_config('request.path', '/rpc/some_other_function', true);
+  PERFORM set_config('request.headers', '{}', true);
   PERFORM check_request();
   RAISE NOTICE 'PASS: Test 13 - check_request passes for non-gated path';
 END;
@@ -203,9 +204,8 @@ $$;
 DO $$
 BEGIN
   PERFORM set_config('request.path', '/rpc/handle_slack_webhook', true);
-  -- Clear headers
-  PERFORM set_config('request.header.x_slack_signature', '', true);
-  PERFORM set_config('request.header.x_slack_request_timestamp', '', true);
+  -- Set headers JSON without Slack signature headers
+  PERFORM set_config('request.headers', '{"content-type":"application/json"}', true);
   BEGIN
     PERFORM check_request();
     RAISE EXCEPTION 'Should have raised missing headers';

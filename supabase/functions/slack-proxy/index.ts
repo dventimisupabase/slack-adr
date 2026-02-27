@@ -11,14 +11,18 @@ const slackBotToken = Deno.env.get("SLACK_BOT_TOKEN")!;
 
 function rpcHeaders(req: Request): Record<string, string> {
   return {
-    "Content-Type": "text/plain",
+    "Content-Type": "application/json",
     apikey: serviceRoleKey,
     Authorization: `Bearer ${serviceRoleKey}`,
-    // Forward Slack signature headers with underscore names (PG GUC constraint)
-    x_slack_signature: req.headers.get("x-slack-signature") ?? "",
-    x_slack_request_timestamp:
+    // Forward Slack signature headers (available via request.headers JSON in PG)
+    "x-slack-signature": req.headers.get("x-slack-signature") ?? "",
+    "x-slack-request-timestamp":
       req.headers.get("x-slack-request-timestamp") ?? "",
   };
+}
+
+function rpcBody(rawBody: string): string {
+  return JSON.stringify({ raw_body: rawBody });
 }
 
 // ADR modal view definition
@@ -193,7 +197,7 @@ Deno.serve(async (req: Request) => {
       // Other slash commands → forward to PostgREST
       const resp = await fetch(
         `${supabaseUrl}/rest/v1/rpc/handle_slack_webhook`,
-        { method: "POST", headers: rpcHeaders(req), body },
+        { method: "POST", headers: rpcHeaders(req), body: rpcBody(body) },
       );
       const result = await resp.text();
       return new Response(result, {
@@ -213,7 +217,7 @@ Deno.serve(async (req: Request) => {
           {
             method: "POST",
             headers: rpcHeaders(req),
-            body: JSON.stringify(payload),
+            body: rpcBody(JSON.stringify(payload)),
           },
         );
         const result = await resp.text();
@@ -258,7 +262,7 @@ Deno.serve(async (req: Request) => {
               {
                 method: "POST",
                 headers: rpcHeaders(req),
-                body, // Raw form-encoded body as text/plain
+                body: rpcBody(body),
               },
             );
 
@@ -286,7 +290,7 @@ Deno.serve(async (req: Request) => {
     // Path 3: Default — forward raw body to PostgREST
     const resp = await fetch(
       `${supabaseUrl}/rest/v1/rpc/handle_slack_webhook`,
-      { method: "POST", headers: rpcHeaders(req), body },
+      { method: "POST", headers: rpcHeaders(req), body: rpcBody(body) },
     );
     const result = await resp.text();
     return new Response(result, {
