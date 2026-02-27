@@ -178,4 +178,37 @@ BEGIN
 END;
 $$;
 
+-- Test 7: app_mention with wrong team_id is ignored (multi-workspace safety)
+DO $$
+DECLARE
+  result json;
+  cnt_before int;
+  cnt_after int;
+  evt_payload text;
+BEGIN
+  -- Channel C_EVT_ON is enabled for T_EVT (from Test 2)
+  SELECT count(*) INTO cnt_before FROM adr_outbox;
+
+  evt_payload := '{
+    "type": "event_callback",
+    "team_id": "T_WRONG_TEAM",
+    "event": {
+      "type": "app_mention",
+      "channel": "C_EVT_ON",
+      "ts": "1234567890.555",
+      "user": "U_EVT5",
+      "text": "<@BOTID> adr"
+    }
+  }';
+
+  result := handle_slack_event(evt_payload);
+  ASSERT result->>'ok' = 'true', 'Should return ok';
+
+  SELECT count(*) INTO cnt_after FROM adr_outbox;
+  ASSERT cnt_after = cnt_before,
+    format('Should not add outbox rows for wrong team, before=%s after=%s', cnt_before, cnt_after);
+  RAISE NOTICE 'PASS: Test 7 - app_mention with wrong team_id is ignored';
+END;
+$$;
+
 ROLLBACK;

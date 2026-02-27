@@ -159,9 +159,17 @@ async function openModal(
   const result = await slackResp.json();
   if (!result.ok) {
     console.error("views.open failed:", result);
+    // Return ephemeral error so user knows the modal didn't open
+    return new Response(
+      JSON.stringify({
+        response_type: "ephemeral",
+        text: `Failed to open form: ${result.error ?? "unknown error"}. Please try again.`,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
   }
 
-  // Return ephemeral acknowledgment
+  // Return empty acknowledgment (Slack opens modal)
   return new Response("", { status: 200 });
 }
 
@@ -266,18 +274,44 @@ Deno.serve(async (req: Request) => {
               },
             );
 
-            if (resp.ok && responseUrl) {
-              const webhookResult = await resp.json();
-              if (webhookResult) {
+            if (responseUrl) {
+              if (resp.ok) {
+                const webhookResult = await resp.json();
+                if (webhookResult) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(webhookResult),
+                  });
+                }
+              } else {
+                // Post error back to user via response_url
+                const errText = await resp.text();
+                console.error("RPC failed:", resp.status, errText);
                 await fetch(responseUrl, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(webhookResult),
+                  body: JSON.stringify({
+                    replace_original: false,
+                    text: "Something went wrong processing that action. Please try again.",
+                  }),
                 });
               }
             }
           } catch (err) {
             console.error("Background block_actions processing failed:", err);
+            if (responseUrl) {
+              try {
+                await fetch(responseUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    replace_original: false,
+                    text: "Something went wrong. Please try again.",
+                  }),
+                });
+              } catch { /* last resort — nothing we can do */ }
+            }
           }
         })();
 
