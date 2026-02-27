@@ -534,7 +534,34 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr stats shows overview" "$RESP" "Workspace ADR Overview"
 
 # ------------------------------------------------------------------
-echo "--- Test 28: /adr disable via slack-proxy ---"
+echo "--- Test 28: /adr list pagination hint via slack-proxy ---"
+# Create enough ADRs to trigger pagination (need >20 in T_SMOKE workspace)
+for i in $(seq 1 21); do
+  psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+    "SELECT create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Bulk ADR $i', 'ctx');" 2>/dev/null >/dev/null
+done
+BODY='command=%2Fadr&text=list&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_page'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr list shows page hint" "$RESP" "page"
+
+# ------------------------------------------------------------------
+echo "--- Test 29: /adr help includes page syntax ---"
+BODY='command=%2Fadr&text=help&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_help2'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr help includes page syntax" "$RESP" "page N"
+
+# ------------------------------------------------------------------
+echo "--- Test 30: /adr disable via slack-proxy ---"
 # Re-enable first since Test 16 added the channel, and /adr disable needs it enabled
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
   "UPDATE channel_config SET enabled = true WHERE team_id = 'T_SMOKE' AND channel_id = 'C_SMOKE';" 2>/dev/null
