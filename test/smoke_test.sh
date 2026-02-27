@@ -103,16 +103,16 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/functions/v1/
 assert_status "/adr start returns 200" "$STATUS" "200"
 
 # ------------------------------------------------------------------
-echo "--- Test 5: /adr list (empty channel) via slack-proxy ---"
-# Use a unique channel that has no ADRs
-BODY='command=%2Fadr&text=list&team_id=T_SMOKE&channel_id=C_EMPTY&user_id=U_SMOKE&trigger_id=trig4'
+echo "--- Test 5: /adr list (empty workspace) via slack-proxy ---"
+# Use a unique team that has no ADRs (list is workspace-scoped)
+BODY='command=%2Fadr&text=list&team_id=T_EMPTY_WS&channel_id=C_EMPTY&user_id=U_SMOKE&trigger_id=trig4'
 read -r TS SIG <<< "$(sign_request "$BODY")"
 RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "X-Slack-Signature: $SIG" \
   -H "X-Slack-Request-Timestamp: $TS" \
   -d "$BODY")
-assert_contains "/adr list shows no ADRs" "$RESP" "No ADRs found"
+assert_contains "/adr list shows no ADRs in empty workspace" "$RESP" "No ADRs found"
 
 # ------------------------------------------------------------------
 echo "--- Test 6: Direct PostgREST RPC with valid signature ---"

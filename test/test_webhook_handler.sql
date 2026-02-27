@@ -120,26 +120,27 @@ $$;
 -- build_adr_list tests
 -- ============================================================
 
--- Test 9: build_adr_list returns list with ADRs
+-- Test 9: build_adr_list returns ADRs from any channel in the workspace
 DO $$
 DECLARE
   result json;
 BEGIN
-  PERFORM create_adr('T_LIST', 'C_LIST', 'U_TEST', 'First ADR', 'context');
-  PERFORM create_adr('T_LIST', 'C_LIST', 'U_TEST', 'Second ADR', 'context');
+  PERFORM create_adr('T_LIST', 'C_LIST_A', 'U_TEST', 'First ADR', 'context');
+  PERFORM create_adr('T_LIST', 'C_LIST_B', 'U_TEST', 'Second ADR', 'context');
 
-  result := build_adr_list('T_LIST', 'C_LIST');
+  -- Calling from C_LIST_A should still see both (workspace-scoped)
+  result := build_adr_list('T_LIST', 'C_LIST_A');
   ASSERT result->>'response_type' = 'ephemeral',
     format('Expected ephemeral, got %s', result->>'response_type');
   ASSERT result->>'text' LIKE '%First ADR%',
     format('Should contain First ADR: %s', result->>'text');
   ASSERT result->>'text' LIKE '%Second ADR%',
-    format('Should contain Second ADR: %s', result->>'text');
-  RAISE NOTICE 'PASS: Test 9 - build_adr_list returns list with ADRs';
+    format('Should contain Second ADR from other channel: %s', result->>'text');
+  RAISE NOTICE 'PASS: Test 9 - build_adr_list returns ADRs from any channel in workspace';
 END;
 $$;
 
--- Test 10: build_adr_list returns empty message for no ADRs
+-- Test 10: build_adr_list returns empty message for workspace with no ADRs
 DO $$
 DECLARE
   result json;

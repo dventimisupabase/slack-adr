@@ -49,6 +49,26 @@ BEGIN
 END;
 $$;
 
+-- Test 2b: /adr search finds ADRs from other channels in same workspace
+DO $$
+DECLARE
+  rec adrs;
+  result json;
+BEGIN
+  -- Create ADR in a different channel
+  rec := create_adr('T_SC', 'C_OTHER', 'U_SC2B', 'Use Kafka for event streaming', 'Need async messaging');
+
+  -- Search from C_SC should find it (workspace-scoped)
+  result := handle_slack_webhook(
+    'command=%2Fadr&text=search+Kafka&team_id=T_SC&channel_id=C_SC&user_id=U_SC2B&trigger_id=trig2b'
+  );
+
+  ASSERT result->>'text' LIKE '%Kafka%',
+    format('Search should find Kafka ADR from other channel, got: %s', left(result->>'text', 200));
+  RAISE NOTICE 'PASS: Test 2b - /adr search finds ADRs from other channels in workspace';
+END;
+$$;
+
 -- Test 3: /adr search with no results
 DO $$
 DECLARE
