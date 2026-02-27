@@ -11,21 +11,29 @@ const repoName = Deno.env.get("GITHUB_REPO_NAME")!;
 const defaultBranch = Deno.env.get("GITHUB_DEFAULT_BRANCH") ?? "main";
 
 const githubApi = "https://api.github.com";
+const GITHUB_TIMEOUT_MS = 30_000;
 
 async function githubFetch(
   path: string,
   options: RequestInit = {},
 ): Promise<Response> {
   const url = `${githubApi}${path}`;
-  return fetch(url, {
-    ...options,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${githubToken}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(options.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GITHUB_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${githubToken}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(options.headers ?? {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function slugify(title: string): string {
@@ -89,11 +97,11 @@ async function exportToGitHub(
     existingSha = existingData.sha;
   }
 
-  const content = btoa(
-    new TextEncoder()
-      .encode(markdown)
-      .reduce((acc, byte) => acc + String.fromCharCode(byte), ""),
-  );
+  // Encode UTF-8 markdown to base64 for GitHub API
+  const bytes = new TextEncoder().encode(markdown);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  const content = btoa(binary);
 
   const createFileResp = await githubFetch(
     `/repos/${repoOwner}/${repoName}/contents/${filePath}`,

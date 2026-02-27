@@ -286,7 +286,111 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr list shows ADRs" "$RESP" "Accept Test ADR"
 
 # ------------------------------------------------------------------
-echo "--- Test 16: /adr disable via slack-proxy ---"
+echo "--- Test 16: app_mention event via event-proxy ---"
+# Enable a channel for mention testing
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "INSERT INTO channel_config (team_id, channel_id, enabled) VALUES ('T_SMOKE', 'C_MENTION_SMOKE', true) ON CONFLICT ON CONSTRAINT channel_config_pkey DO NOTHING;" 2>/dev/null
+MENTION_BODY='{"type":"event_callback","team_id":"T_SMOKE","event":{"type":"app_mention","channel":"C_MENTION_SMOKE","ts":"8888888888.001","thread_ts":"8888888888.000","user":"U_MENTIONER","text":"<@ADR_BOT> let us record this decision"}}'
+read -r TS SIG <<< "$(sign_request "$MENTION_BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/event-proxy" \
+  -H "Content-Type: application/json" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$MENTION_BODY")
+assert_contains "app_mention returns ok" "$RESP" "ok"
+# Verify outbox row was created with Start ADR button
+OUTBOX_CHECK=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT count(*) FROM adr_outbox WHERE destination = 'slack' AND payload::text LIKE '%Start ADR%' AND payload->>'channel' = 'C_MENTION_SMOKE';" 2>/dev/null | tr -d ' \n')
+if [ "$OUTBOX_CHECK" -ge 1 ]; then
+  echo "  PASS: app_mention created outbox row with Start ADR button"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: app_mention did not create outbox row (count=$OUTBOX_CHECK)"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 17: Modal submission validation errors ---"
+VALIDATION_PAYLOAD=$(python3 -c "
+import json, urllib.parse
+payload = {
+    'type': 'view_submission',
+    'user': {'id': 'U_VALIDATE'},
+    'view': {
+        'private_metadata': 'C_MODAL||',
+        'state': {
+            'values': {
+                'title_block': {'title_input': {'value': None}},
+                'context_block': {'context_input': {'value': None}},
+                'decision_block': {'decision_input': {'value': None}},
+                'alternatives_block': {'alternatives_input': {'value': None}},
+                'consequences_block': {'consequences_input': {'value': None}},
+                'open_questions_block': {'open_questions_input': {'value': None}},
+                'decision_drivers_block': {'decision_drivers_input': {'value': None}},
+                'implementation_plan_block': {'implementation_plan_input': {'value': None}},
+                'reviewers_block': {'reviewers_input': {'value': None}}
+            }
+        }
+    }
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "$VALIDATION_PAYLOAD")
+assert_contains "Validation returns response_action errors" "$RESP" "response_action"
+assert_contains "Validation flags title_block" "$RESP" "title_block"
+assert_contains "Validation flags context_block" "$RESP" "context_block"
+
+# ------------------------------------------------------------------
+echo "--- Test 18: Edit ADR modal submission via slack-proxy ---"
+# Create an ADR to edit
+EDIT_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT (create_adr('T_MODAL', 'C_MODAL', 'U_EDITOR', 'Original Smoke Title', 'Original context')).id;" 2>/dev/null | tr -d ' \n')
+EDIT_PAYLOAD=$(python3 -c "
+import json, urllib.parse
+payload = {
+    'type': 'view_submission',
+    'user': {'id': 'U_EDITOR'},
+    'view': {
+        'private_metadata': 'C_MODAL||$EDIT_ADR_ID',
+        'state': {
+            'values': {
+                'title_block': {'title_input': {'value': 'Updated Smoke Title'}},
+                'context_block': {'context_input': {'value': 'Updated smoke context'}},
+                'decision_block': {'decision_input': {'value': 'New decision'}},
+                'alternatives_block': {'alternatives_input': {'value': None}},
+                'consequences_block': {'consequences_input': {'value': None}},
+                'open_questions_block': {'open_questions_input': {'value': None}},
+                'decision_drivers_block': {'decision_drivers_input': {'value': None}},
+                'implementation_plan_block': {'implementation_plan_input': {'value': None}},
+                'reviewers_block': {'reviewers_input': {'value': None}}
+            }
+        }
+    }
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "$EDIT_PAYLOAD")
+assert_status "Edit modal submission returns 200" "$STATUS" "200"
+# Verify ADR was updated
+UPDATED_TITLE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT title FROM adrs WHERE id = '$EDIT_ADR_ID';" 2>/dev/null)
+if [ "$UPDATED_TITLE" = "Updated Smoke Title" ]; then
+  echo "  PASS: Edit modal updated ADR title in database"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: ADR title is '$UPDATED_TITLE', expected 'Updated Smoke Title'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 19: /adr disable via slack-proxy ---"
+# Re-enable first since Test 16 added the channel, and /adr disable needs it enabled
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "UPDATE channel_config SET enabled = true WHERE team_id = 'T_SMOKE' AND channel_id = 'C_SMOKE';" 2>/dev/null
 BODY='command=%2Fadr&text=disable&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig5'
 read -r TS SIG <<< "$(sign_request "$BODY")"
 RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \

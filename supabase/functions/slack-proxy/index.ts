@@ -324,8 +324,8 @@ Deno.serve(async (req: Request) => {
           }
         })();
 
-        // Don't await — acknowledge immediately
-        void bgWork;
+        // Don't await — acknowledge immediately. Catch to surface errors.
+        bgWork.catch((err) => console.error("Unhandled bgWork error:", err));
         return new Response("", { status: 200 });
       }
     }
