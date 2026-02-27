@@ -31,8 +31,8 @@ DO $$
 DECLARE
   rec adrs;
 BEGIN
-  INSERT INTO adrs (id, state, team_id, channel_id, created_by, title)
-  VALUES ('ADR-2026-999001', 'DRAFT', 'T_TEST_001', 'C_TEST_001', 'U_USER_001', 'Test ADR')
+  INSERT INTO adrs (id, state, team_id, channel_id, created_by, title, context_text)
+  VALUES ('ADR-2026-999001', 'DRAFT', 'T_TEST_001', 'C_TEST_001', 'U_USER_001', 'Test ADR', 'Test context')
   RETURNING * INTO rec;
   ASSERT rec.version = 1, 'Default version should be 1';
   ASSERT rec.state = 'DRAFT', 'State should be DRAFT';
