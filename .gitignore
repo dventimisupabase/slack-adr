@@ -1,0 +1,19 @@
+# Environment
+.env
+.env.local
+.env.*.local
+.env.keys
+
+# Supabase
+supabase/.branches
+supabase/.temp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,47 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sql-tests:
+    name: SQL Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase
+        run: supabase start
+
+      - name: Run SQL tests
+        run: make test-sql
+
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase
+        run: supabase start
+
+      - name: Serve Edge Functions
+        run: |
+          supabase functions serve --no-verify-jwt &
+          sleep 5
+
+      - name: Run smoke tests
+        run: make test-smoke

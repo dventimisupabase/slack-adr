@@ -76,6 +76,9 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr help returns commands" "$RESP" "ADR Bot Commands"
 assert_contains "/adr help mentions start" "$RESP" "/adr start"
 assert_contains "/adr help mentions enable" "$RESP" "/adr enable"
+assert_contains "/adr help mentions search" "$RESP" "/adr search"
+assert_contains "/adr help mentions reject" "$RESP" "/adr reject"
+assert_contains "/adr help mentions supersede" "$RESP" "/adr supersede"
 
 # ------------------------------------------------------------------
 echo "--- Test 3: /adr enable via slack-proxy ---"
@@ -387,7 +390,80 @@ else
 fi
 
 # ------------------------------------------------------------------
-echo "--- Test 19: /adr disable via slack-proxy ---"
+echo "--- Test 19: /adr search via slack-proxy ---"
+# Search for the ADR created in test 12
+BODY='command=%2Fadr&text=search+Smoke+Test+Modal&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_search'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr search finds ADR" "$RESP" "Smoke Test Modal"
+
+# ------------------------------------------------------------------
+echo "--- Test 20: /adr search with no results ---"
+BODY='command=%2Fadr&text=search+xyznonexistent99&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_search2'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr search no results" "$RESP" "No ADRs found"
+
+# ------------------------------------------------------------------
+echo "--- Test 21: /adr reject via slack-proxy ---"
+# Create an ADR to reject
+REJECT_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Reject Smoke ADR', 'ctx')).id;" 2>/dev/null | tr -d ' \n')
+BODY="command=%2Fadr&text=reject+$REJECT_ADR_ID&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_reject"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr reject shows REJECTED" "$RESP" "REJECTED"
+# Verify state in DB
+REJECT_STATE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT state FROM adrs WHERE id = '$REJECT_ADR_ID';" 2>/dev/null)
+if [ "$REJECT_STATE" = "REJECTED" ]; then
+  echo "  PASS: ADR transitioned to REJECTED via slash command"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: ADR state is '$REJECT_STATE', expected 'REJECTED'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 22: /adr supersede via slack-proxy ---"
+# Create and accept an ADR to supersede
+SUPERSEDE_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Supersede Smoke ADR', 'ctx')).id;" 2>/dev/null | tr -d ' \n')
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT apply_adr_event('$SUPERSEDE_ADR_ID', 'ADR_ACCEPTED', 'user', 'U_SMOKE');" 2>/dev/null
+BODY="command=%2Fadr&text=supersede+$SUPERSEDE_ADR_ID&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_supersede"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr supersede shows SUPERSEDED" "$RESP" "SUPERSEDED"
+# Verify state in DB
+SUPERSEDE_STATE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT state FROM adrs WHERE id = '$SUPERSEDE_ADR_ID';" 2>/dev/null)
+if [ "$SUPERSEDE_STATE" = "SUPERSEDED" ]; then
+  echo "  PASS: ADR transitioned to SUPERSEDED via slash command"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: ADR state is '$SUPERSEDE_STATE', expected 'SUPERSEDED'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 23: /adr disable via slack-proxy ---"
 # Re-enable first since Test 16 added the channel, and /adr disable needs it enabled
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
   "UPDATE channel_config SET enabled = true WHERE team_id = 'T_SMOKE' AND channel_id = 'C_SMOKE';" 2>/dev/null
