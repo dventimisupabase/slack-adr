@@ -463,7 +463,41 @@ else
 fi
 
 # ------------------------------------------------------------------
-echo "--- Test 23: /adr disable via slack-proxy ---"
+echo "--- Test 23: /adr accept via slack-proxy ---"
+ACCEPT_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Accept Smoke ADR', 'ctx')).id;" 2>/dev/null)
+BODY="command=%2Fadr&text=accept+$ACCEPT_ADR_ID&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_accept"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr accept shows ACCEPTED" "$RESP" "ACCEPTED"
+# Verify state in DB
+ACCEPT_STATE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT state FROM adrs WHERE id = '$ACCEPT_ADR_ID';" 2>/dev/null)
+if [ "$ACCEPT_STATE" = "ACCEPTED" ]; then
+  echo "  PASS: ADR transitioned to ACCEPTED via slash command"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: ADR state is '$ACCEPT_STATE', expected 'ACCEPTED'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 24: Help text includes /adr accept ---"
+BODY='command=%2Fadr&text=help&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_help2'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "Help includes /adr accept" "$RESP" "/adr accept"
+
+# ------------------------------------------------------------------
+echo "--- Test 25: /adr disable via slack-proxy ---"
 # Re-enable first since Test 16 added the channel, and /adr disable needs it enabled
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
   "UPDATE channel_config SET enabled = true WHERE team_id = 'T_SMOKE' AND channel_id = 'C_SMOKE';" 2>/dev/null
