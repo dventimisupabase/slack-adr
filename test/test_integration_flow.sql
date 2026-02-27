@@ -61,6 +61,39 @@ BEGIN
   adr_id := rec.id;
   RAISE NOTICE 'PASS: Step 2 - Modal submission creates ADR: %', adr_id;
 
+  -- Step 2b: Edit ADR via modal submission
+  modal_result := handle_slack_modal_submission(format('{
+    "type": "view_submission",
+    "user": {"id": "U_ENGINEER"},
+    "view": {
+      "private_metadata": "C_INT|1234567890.001|%s",
+      "state": {
+        "values": {
+          "title_block": {"title_input": {"value": "Use event sourcing for ADR state (revised)"}},
+          "context_block": {"context_input": {"value": "We need a reliable state machine for ADR lifecycle"}},
+          "decision_block": {"decision_input": {"value": "Append-only events with mutable projection, optimistic concurrency"}},
+          "alternatives_block": {"alternatives_input": {"value": "1. Direct mutations\n2. CQRS with separate read/write\n3. Saga pattern"}},
+          "consequences_block": {"consequences_input": {"value": "Full audit trail, slightly more complex queries"}},
+          "open_questions_block": {"open_questions_input": {"value": null}},
+          "decision_drivers_block": {"decision_drivers_input": {"value": "Auditability, simplicity, concurrency"}},
+          "implementation_plan_block": {"implementation_plan_input": {"value": "1. Create events table\n2. Build reducer\n3. Add outbox"}},
+          "reviewers_block": {"reviewers_input": {"value": "Tech Lead, DBA, Platform Team"}}
+        }
+      }
+    }
+  }', adr_id));
+  ASSERT modal_result IS NULL, format('Edit modal should return NULL, got %s', modal_result);
+
+  SELECT * INTO rec FROM adrs WHERE id = adr_id;
+  ASSERT rec.title = 'Use event sourcing for ADR state (revised)',
+    format('Title should be updated, got %s', rec.title);
+  ASSERT rec.decision LIKE '%optimistic concurrency%',
+    format('Decision should be updated, got %s', rec.decision);
+  ASSERT rec.reviewers LIKE '%Platform Team%',
+    format('Reviewers should be updated, got %s', rec.reviewers);
+  ASSERT rec.state = 'DRAFT', format('State should still be DRAFT after edit, got %s', rec.state);
+  RAISE NOTICE 'PASS: Step 2b - Edit ADR via modal submission updates fields';
+
   -- Step 3: /adr list
   list_result := handle_slack_webhook(
     format('command=%%2Fadr&text=list&team_id=T_INT&channel_id=C_INT&user_id=U_ENGINEER&trigger_id=trig2')
@@ -76,7 +109,9 @@ BEGIN
   blocks_text := view_result::text;
   ASSERT blocks_text LIKE '%event sourcing%',
     format('View should contain title: %s', left(blocks_text, 200));
-  RAISE NOTICE 'PASS: Step 4 - /adr view shows Block Kit';
+  ASSERT blocks_text LIKE '%revised%',
+    format('View should show revised title: %s', left(blocks_text, 200));
+  RAISE NOTICE 'PASS: Step 4 - /adr view shows Block Kit with updated title';
 
   -- Step 5: Accept the ADR (simulates interactive button press)
   PERFORM set_config('app.suppress_outbox', 'true', true);
@@ -115,10 +150,10 @@ BEGIN
     md text;
   BEGIN
     md := render_adr_markdown(adr_id);
-    ASSERT md LIKE '%# Use event sourcing for ADR state%', 'Markdown should have title';
+    ASSERT md LIKE '%# Use event sourcing for ADR state (revised)%', 'Markdown should have revised title';
     ASSERT md LIKE '%## Decision%', 'Markdown should have Decision section';
-    ASSERT md LIKE '%Append-only events%', 'Markdown should have decision content';
-    ASSERT md LIKE '%Tech Lead%', 'Markdown should have reviewers';
+    ASSERT md LIKE '%optimistic concurrency%', 'Markdown should have updated decision content';
+    ASSERT md LIKE '%Platform Team%', 'Markdown should have updated reviewers';
     RAISE NOTICE 'PASS: Step 8 - Markdown rendering complete';
   END;
 

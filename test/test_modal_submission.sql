@@ -8,7 +8,8 @@ SET LOCAL app.test_secret_SLACK_SIGNING_SECRET = 'test';
 SET LOCAL app.test_secret_SLACK_BOT_TOKEN = 'xoxb-test';
 
 -- Seed a channel_config so create_adr can look up team_id
-INSERT INTO channel_config (team_id, channel_id, enabled) VALUES ('T_MODAL', 'C_MODAL', true);
+INSERT INTO channel_config (team_id, channel_id, enabled) VALUES ('T_MODAL', 'C_MODAL', true)
+ON CONFLICT ON CONSTRAINT channel_config_pkey DO NOTHING;
 
 -- Test 1: Create flow - new ADR from modal submission
 DO $$
