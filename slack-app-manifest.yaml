@@ -1,0 +1,33 @@
+display_information:
+  name: ADR Bot
+  description: Create and manage Architectural Decision Records from Slack.
+  background_color: "#2c2d30"
+
+features:
+  bot_user:
+    display_name: ADR Bot
+    always_online: true
+  slash_commands:
+    - command: /adr
+      url: https://<PROJECT_REF>.supabase.co/functions/v1/slack-proxy
+      description: Create or manage ADRs
+      usage_hint: "start | enable | disable | list | view <id> | help"
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - app_mentions:read
+      - channels:history
+      - groups:history
+
+settings:
+  event_subscriptions:
+    request_url: https://<PROJECT_REF>.supabase.co/functions/v1/event-proxy
+    bot_events:
+      - app_mention
+  interactivity:
+    is_enabled: true
+    request_url: https://<PROJECT_REF>.supabase.co/functions/v1/slack-proxy
+  socket_mode_enabled: false

@@ -155,19 +155,22 @@ $$;
 -- build_adr_view tests
 -- ============================================================
 
--- Test 11: build_adr_view returns ADR details
+-- Test 11: build_adr_view returns ADR details (Block Kit format after Step 9)
 DO $$
 DECLARE
   rec adrs;
   result json;
+  blocks_text text;
 BEGIN
   rec := create_adr('T_VIEW', 'C_VIEW', 'U_TEST', 'View Test ADR', 'Some important context');
   result := build_adr_view('T_VIEW', rec.id);
-  ASSERT result->>'text' LIKE '%View Test ADR%',
-    format('Should contain title: %s', result->>'text');
-  ASSERT result->>'text' LIKE '%DRAFT%',
-    format('Should contain state: %s', result->>'text');
-  RAISE NOTICE 'PASS: Test 11 - build_adr_view returns ADR details';
+  -- Step 9 upgraded build_adr_view to return Block Kit blocks
+  blocks_text := result::text;
+  ASSERT blocks_text LIKE '%View Test ADR%',
+    format('Should contain title in blocks: %s', blocks_text);
+  ASSERT blocks_text LIKE '%DRAFT%',
+    format('Should contain state in blocks: %s', blocks_text);
+  RAISE NOTICE 'PASS: Test 11 - build_adr_view returns ADR details (Block Kit)';
 END;
 $$;
 
