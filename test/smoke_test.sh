@@ -498,7 +498,32 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "Help includes /adr accept" "$RESP" "/adr accept"
 
 # ------------------------------------------------------------------
-echo "--- Test 25: /adr disable via slack-proxy ---"
+echo "--- Test 25: /adr list draft via slack-proxy ---"
+# Create a draft ADR
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Filter Draft ADR', 'ctx')).id;" 2>/dev/null
+BODY='command=%2Fadr&text=list+draft&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_listdraft'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr list draft shows DRAFT ADRs" "$RESP" "DRAFT"
+
+# ------------------------------------------------------------------
+echo "--- Test 26: /adr list accepted filters correctly ---"
+BODY='command=%2Fadr&text=list+accepted&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_listacc'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr list accepted shows ACCEPTED heading" "$RESP" "ACCEPTED"
+
+# ------------------------------------------------------------------
+echo "--- Test 27: /adr disable via slack-proxy ---"
 # Re-enable first since Test 16 added the channel, and /adr disable needs it enabled
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
   "UPDATE channel_config SET enabled = true WHERE team_id = 'T_SMOKE' AND channel_id = 'C_SMOKE';" 2>/dev/null
