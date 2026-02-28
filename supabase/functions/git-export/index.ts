@@ -43,11 +43,12 @@ async function githubFetch(
 }
 
 function slugify(title: string): string {
-  return title
+  const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 50);
+  return slug || "untitled";
 }
 
 async function exportToGitHub(
