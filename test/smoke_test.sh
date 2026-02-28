@@ -721,6 +721,40 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "Long title returns validation error" "$RESP" "200 characters"
 
 # ------------------------------------------------------------------
+echo "--- Test 40: /adr accept with reason via slack-proxy ---"
+REASON_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Reason Test ADR', 'ctx')).id;" 2>/dev/null | tr -d ' \n')
+BODY="command=%2Fadr&text=accept+${REASON_ADR_ID}+Cost+is+acceptable&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_reason"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr accept with reason shows ACCEPTED" "$RESP" "ACCEPTED"
+# Verify reason stored in event payload
+REASON_CHECK=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qtA -c \
+  "SELECT payload->>'reason' FROM adr_events WHERE adr_id = '$REASON_ADR_ID' AND event_type = 'ADR_ACCEPTED';" 2>/dev/null)
+if [ "$REASON_CHECK" = "Cost is acceptable" ]; then
+  echo "  PASS: Reason stored in event payload"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: Reason not stored correctly (got: '$REASON_CHECK')"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
+echo "--- Test 41: /adr help includes reason syntax ---"
+BODY='command=%2Fadr&text=help&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_helpreason'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr help shows reason syntax" "$RESP" "reason"
+
+# ------------------------------------------------------------------
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 if [ "$FAIL" -gt 0 ]; then
