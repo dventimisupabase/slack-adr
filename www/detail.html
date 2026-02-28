@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADR Bot — Decision Detail</title>
+  <link rel="icon" type="image/png" href="adr-bot-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a href="index.html" class="topbar-brand">
+        <img src="adr-bot-icon.png" alt="ADR Bot" class="topbar-icon">
+        <span>ADR Bot</span>
+      </a>
+      <nav class="topbar-nav">
+        <a href="index.html">Dashboard</a>
+        <a href="about.html">About</a>
+      </nav>
+      <span class="topbar-user"><span id="user-info"></span><button class="topbar-signout" onclick="signOut()" title="Sign out">Sign out</button></span>
+    </header>
+
+    <div id="auth" class="auth-card">
+      <img src="adr-bot-icon.png" alt="ADR Bot" class="auth-logo">
+      <h2>ADR Bot</h2>
+      <p class="auth-tagline">Architecture Decision Records for your team</p>
+      <p>Sign in with your Slack workspace account.</p>
+      <button class="btn btn-primary btn-slack" onclick="signInWithSlack()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.27 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.163 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.163 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.163 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.27a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.315A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.315z"/></svg>
+        Sign in with Slack
+      </button>
+      <p id="auth-msg" class="hidden mt-2"></p>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="page-header fade-in">
+        <h1>ADR <span class="mono" id="adr-id"></span></h1>
+      </div>
+
+      <div id="msg"></div>
+
+      <!-- Workflow stepper -->
+      <div class="card fade-in fade-in-1 mb-3" id="stepper-card">
+        <div class="card-header">
+          <h3>Workflow</h3>
+        </div>
+        <div class="card-body">
+          <div id="workflow-stepper"></div>
+        </div>
+      </div>
+
+      <!-- Guidance banner -->
+      <div id="guidance" class="fade-in fade-in-1"></div>
+
+      <!-- ADR fields -->
+      <div class="card fade-in fade-in-2 mb-3">
+        <div class="card-header">
+          <h3>Details</h3>
+          <span id="state-badge"></span>
+        </div>
+        <div class="card-body">
+          <div class="detail-grid" id="detail-grid">
+            <div class="detail-item" style="grid-column:1/-1"><span class="loading">Loading...</span></div>
+          </div>
+        </div>
+        <div class="links-row hidden" id="links-row"></div>
+      </div>
+
+      <!-- Notes for actions -->
+      <div class="form-group full fade-in fade-in-3" id="notes-group" style="margin-top:1rem;display:none;">
+        <label for="action-notes">Notes (optional reason)</label>
+        <textarea id="action-notes" rows="3" placeholder="Add a note about your decision..."></textarea>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="actions fade-in fade-in-3" id="actions"></div>
+
+      <!-- Events timeline -->
+      <div class="fade-in fade-in-4 mt-3">
+        <div class="section-label">Event Log</div>
+        <ul class="timeline" id="timeline">
+          <li class="loading">Loading events...</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const adrId = params.get('id');
+
+    async function init() {
+      if (!adrId) {
+        document.body.innerHTML = '<div class="shell"><div class="msg msg-error mt-3">No ADR ID provided.</div></div>';
+        return;
+      }
+      document.getElementById('adr-id').textContent = adrId;
+      await initAuth();
+    }
+
+    async function showApp(user) {
+      document.getElementById('auth').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      const displayName = user.user_metadata?.name || user.user_metadata?.full_name || user.email;
+      document.getElementById('user-info').textContent = displayName;
+      window._userId = getSlackUserId(user);
+      await loadDetail();
+    }
+
+    async function loadDetail() {
+      const [adrResult, eventsResult] = await Promise.all([
+        sb.from('adrs').select('*').eq('id', adrId).single(),
+        sb.from('adr_events').select('*').eq('adr_id', adrId).order('created_at', { ascending: true })
+      ]);
+
+      if (adrResult.error) {
+        document.getElementById('msg').innerHTML = '<div class="msg msg-error">' + esc(adrResult.error.message) + '</div>';
+        return;
+      }
+
+      const r = adrResult.data;
+
+      // Workflow stepper
+      renderStepper(r);
+
+      // Guidance banner
+      var guidance = getGuidance(r);
+      var guidanceEl = document.getElementById('guidance');
+      if (guidance) {
+        guidanceEl.innerHTML = '<div class="guidance-banner ' + guidance.style + '">' + esc(guidance.text) + '</div>';
+      } else {
+        guidanceEl.innerHTML = '';
+      }
+
+      // State badge
+      document.getElementById('state-badge').innerHTML = '<span class="badge badge-' + r.state + '">' + fmtState(r.state) + '</span>';
+
+      // Detail grid — show populated fields, skip empty ones
+      var grid = document.getElementById('detail-grid');
+      var items = '';
+
+      items += detailItem('Title', esc(r.title));
+      items += detailItem('State', '<span class="badge badge-' + r.state + '">' + fmtState(r.state) + '</span>');
+
+      if (r.context_text) items += detailItemFull('Context', '<div class="detail-value prose">' + esc(r.context_text) + '</div>');
+      if (r.decision) items += detailItemFull('Decision', '<div class="detail-value prose">' + esc(r.decision) + '</div>');
+      if (r.alternatives) items += detailItemFull('Alternatives', '<div class="detail-value prose">' + esc(r.alternatives) + '</div>');
+      if (r.consequences) items += detailItemFull('Consequences', '<div class="detail-value prose">' + esc(r.consequences) + '</div>');
+      if (r.decision_drivers) items += detailItemFull('Decision Drivers', '<div class="detail-value prose">' + esc(r.decision_drivers) + '</div>');
+      if (r.open_questions) items += detailItemFull('Open Questions', '<div class="detail-value prose">' + esc(r.open_questions) + '</div>');
+      if (r.implementation_plan) items += detailItemFull('Implementation Plan', '<div class="detail-value prose">' + esc(r.implementation_plan) + '</div>');
+      if (r.reviewers) items += detailItem('Reviewers', esc(r.reviewers));
+
+      items += detailItem('Created By', '<span class="detail-value mono">' + esc(r.created_by) + '</span>');
+      items += detailItem('Version', '<span class="detail-value mono">' + r.version + '</span>');
+      items += detailItem('Created', fmtDate(r.created_at));
+      items += detailItem('Updated', fmtDate(r.updated_at));
+
+      grid.innerHTML = items;
+
+      // Links row
+      var linksRow = document.getElementById('links-row');
+      var links = '';
+      if (r.slack_thread_link) links += '<a href="' + esc(r.slack_thread_link) + '" target="_blank" rel="noopener">Slack Thread &rarr;</a>';
+      if (r.git_pr_url) links += '<a href="' + esc(r.git_pr_url) + '" target="_blank" rel="noopener">Git PR &rarr;</a>';
+      if (links) {
+        linksRow.innerHTML = links;
+        linksRow.classList.remove('hidden');
+      } else {
+        linksRow.classList.add('hidden');
+      }
+
+      // Action buttons & notes
+      var acts = document.getElementById('actions');
+      acts.innerHTML = '';
+      var state = r.state;
+      var hasActions = state !== 'SUPERSEDED';
+      document.getElementById('notes-group').style.display = hasActions ? '' : 'none';
+
+      if (state === 'DRAFT') {
+        acts.innerHTML = ''
+          + '<button class="btn btn-success" onclick="applyEvent(\'ADR_ACCEPTED\')">Accept</button>'
+          + '<button class="btn btn-danger" onclick="applyEvent(\'ADR_REJECTED\')">Reject</button>'
+          + '<button class="btn btn-ghost" onclick="applyEvent(\'EXPORT_REQUESTED\')">Export to Git</button>';
+      } else if (state === 'ACCEPTED') {
+        acts.innerHTML = ''
+          + '<button class="btn btn-ghost" onclick="applyEvent(\'ADR_SUPERSEDED\')">Supersede</button>'
+          + '<button class="btn btn-ghost" onclick="applyEvent(\'EXPORT_REQUESTED\')">Export to Git</button>';
+      } else if (state === 'REJECTED') {
+        acts.innerHTML = '<button class="btn btn-info" onclick="applyEvent(\'ADR_REOPENED\')">Reopen</button>';
+      }
+
+      // Events timeline
+      var tl = document.getElementById('timeline');
+      if (eventsResult.error || !eventsResult.data.length) {
+        tl.innerHTML = '<li>No events found.</li>';
+      } else {
+        tl.innerHTML = eventsResult.data.map(function(e) {
+          var payloadKeys = e.payload ? Object.keys(e.payload) : [];
+          var reason = e.payload && e.payload.reason ? e.payload.reason : null;
+          var payloadDisplay = '';
+          if (payloadKeys.length > 0) {
+            // Show reason separately, show rest as payload
+            var rest = {};
+            payloadKeys.forEach(function(k) { if (k !== 'reason') rest[k] = e.payload[k]; });
+            if (Object.keys(rest).length > 0) {
+              payloadDisplay = '<div class="event-payload">' + esc(JSON.stringify(rest)) + '</div>';
+            }
+          }
+          return '<li>'
+            + '<span class="event-type">' + fmtEventType(e.event_type) + '</span>'
+            + '<span class="event-meta"> &mdash; ' + e.actor_type + ':' + esc(e.actor_id) + ' at ' + fmtDate(e.created_at) + '</span>'
+            + payloadDisplay
+            + (reason ? '<div class="event-notes">' + esc(reason) + '</div>' : '')
+            + '</li>';
+        }).join('');
+      }
+    }
+
+    function detailItem(label, valueHtml) {
+      return '<div class="detail-item"><div class="detail-label">' + label + '</div><div class="detail-value">' + valueHtml + '</div></div>';
+    }
+
+    function detailItemFull(label, valueHtml) {
+      return '<div class="detail-item full"><div class="detail-label">' + label + '</div>' + valueHtml + '</div>';
+    }
+
+    async function applyEvent(eventType) {
+      var msgEl = document.getElementById('msg');
+      msgEl.innerHTML = '';
+      var actorId = window._userId || 'web-user';
+      var notesEl = document.getElementById('action-notes');
+      var notes = notesEl ? notesEl.value.trim() : '';
+      var payload = {};
+      if (notes) payload.reason = notes;
+
+      var rpcParams = {
+        p_adr_id: adrId,
+        p_event_type: eventType,
+        p_actor_type: 'user',
+        p_actor_id: actorId,
+        p_payload: payload
+      };
+
+      // Disable buttons during request
+      var buttons = document.querySelectorAll('#actions .btn');
+      buttons.forEach(function(b) { b.disabled = true; });
+
+      var result = await sb.rpc('apply_adr_event', rpcParams);
+      if (result.error) {
+        msgEl.innerHTML = '<div class="msg msg-error">' + esc(result.error.message) + '</div>';
+        buttons.forEach(function(b) { b.disabled = false; });
+      } else {
+        if (notesEl) notesEl.value = '';
+        msgEl.innerHTML = '<div class="msg msg-success">Event ' + fmtEventType(eventType) + ' applied.</div>';
+        await loadDetail();
+      }
+    }
+
+    function renderStepper(r) {
+      // ADR lifecycle: Draft → Accepted → Superseded
+      // REJECTED branches off from Draft
+      var stages = [
+        { key: 'DRAFT', label: 'Draft' },
+        { key: 'ACCEPTED', label: 'Accepted' },
+        { key: 'SUPERSEDED', label: 'Superseded' }
+      ];
+      var stageOrder = stages.map(function(s) { return s.key; });
+      var state = r.state;
+      var isRejected = state === 'REJECTED';
+      var currentIdx = stageOrder.indexOf(state);
+
+      var html = '<div class="stepper">';
+      stages.forEach(function(stage, i) {
+        var nodeClass = 'stepper-node';
+        var labelClass = 'stepper-label';
+
+        if (isRejected) {
+          // REJECTED: Draft stage is "failed", nothing else highlighted
+          if (i === 0) { nodeClass += ' failed'; labelClass += ' failed'; }
+        } else {
+          if (i < currentIdx) { nodeClass += ' completed'; labelClass += ' completed'; }
+          else if (i === currentIdx) { nodeClass += ' active'; labelClass += ' active'; }
+        }
+
+        // Leading connector
+        var connClass = i === 0 ? 'invisible' :
+          (!isRejected && i <= currentIdx) ? 'completed' : '';
+
+        html += '<div class="stepper-stage">';
+        html += '<div class="stepper-row">';
+        html += '<div class="stepper-connector ' + connClass + '"></div>';
+
+        // Node icon
+        var icon = i + 1;
+        if (nodeClass.indexOf('completed') !== -1) icon = '\u2713';
+        else if (nodeClass.indexOf('active') !== -1) icon = '\u25CF';
+        else if (nodeClass.indexOf('failed') !== -1) icon = '\u2717';
+
+        html += '<div class="' + nodeClass + '">' + icon + '</div>';
+
+        // Trailing connector
+        var trailClass = i === stages.length - 1 ? 'invisible' :
+          (!isRejected && i < currentIdx) ? 'completed' : '';
+        html += '<div class="stepper-connector ' + trailClass + '"></div>';
+
+        html += '</div>';
+        html += '<div class="' + labelClass + '">' + stage.label + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+
+      // Terminal state indicator for REJECTED
+      if (isRejected) {
+        html += '<div style="text-align:center;margin-top:0.5rem;"><span class="badge badge-REJECTED">Rejected</span></div>';
+      }
+
+      document.getElementById('workflow-stepper').innerHTML = html;
+    }
+
+    function getGuidance(r) {
+      switch (r.state) {
+        case 'DRAFT':
+          return { text: 'This ADR is in draft. Review the content, then accept or reject it.', style: 'guidance-info' };
+        case 'ACCEPTED':
+          return { text: 'This ADR has been accepted. It can be superseded if a new decision replaces it, or exported to Git.', style: 'guidance-success' };
+        case 'REJECTED':
+          return { text: 'This ADR was rejected. It can be reopened if the decision needs to be reconsidered.', style: 'guidance-error' };
+        case 'SUPERSEDED':
+          return { text: 'This ADR has been superseded by a newer decision.', style: 'guidance-muted' };
+        default:
+          return null;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

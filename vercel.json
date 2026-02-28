@@ -1,0 +1,7 @@
+{
+  "buildCommand": "echo \"const SUPABASE_URL = '$SUPABASE_URL'; const SUPABASE_ANON_KEY = '$SUPABASE_ANON_KEY';\" > www/config.js",
+  "outputDirectory": "www",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/$1" }
+  ]
+}
