@@ -294,11 +294,14 @@ Deno.serve(async (req: Request) => {
               if (resp.ok) {
                 const webhookResult = await resp.json();
                 if (webhookResult) {
-                  await fetch(responseUrl, {
+                  const postResp = await fetch(responseUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(webhookResult),
                   });
+                  if (!postResp.ok) {
+                    console.error("response_url post failed:", postResp.status, await postResp.text().catch(() => ""));
+                  }
                 }
               } else {
                 // Post error back to user via response_url
