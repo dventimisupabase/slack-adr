@@ -54,6 +54,10 @@ assert_status() {
   fi
 }
 
+# Clear rate limit table from any previous runs
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "DELETE FROM rate_limit_buckets;" 2>/dev/null || true
+
 echo "=== ADR Slack Bot Smoke Tests ==="
 echo ""
 
@@ -660,6 +664,61 @@ else
   echo "  FAIL: Deleted ADR still exists (count=$DELETED_CHECK)"
   FAIL=$((FAIL + 1))
 fi
+
+# ------------------------------------------------------------------
+echo "--- Test 37: Unknown subcommand suggests similar command ---"
+BODY='command=%2Fadr&text=serach+foo&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_typo'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "Typo suggests similar command" "$RESP" "Did you mean"
+assert_contains "Typo suggests search" "$RESP" "search"
+
+# ------------------------------------------------------------------
+echo "--- Test 38: Completely unknown command shows help ---"
+BODY='command=%2Fadr&text=xyzzy&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_unk'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "Unknown command shows help" "$RESP" "ADR Bot Commands"
+
+# ------------------------------------------------------------------
+echo "--- Test 39: Modal rejects title longer than 200 chars ---"
+LONG_TITLE_PAYLOAD=$(python3 -c "
+import json, urllib.parse
+long_title = 'A' * 250
+payload = {
+    'type': 'view_submission',
+    'user': {'id': 'U_SMOKE'},
+    'view': {
+        'private_metadata': 'C_SMOKE||',
+        'state': {
+            'values': {
+                'title_block': {'title_input': {'value': long_title}},
+                'context_block': {'context_input': {'value': 'ctx'}},
+                'decision_block': {'decision_input': {'value': None}},
+                'alternatives_block': {'alternatives_input': {'value': None}},
+                'consequences_block': {'consequences_input': {'value': None}},
+                'open_questions_block': {'open_questions_input': {'value': None}},
+                'decision_drivers_block': {'decision_drivers_input': {'value': None}},
+                'implementation_plan_block': {'implementation_plan_input': {'value': None}},
+                'reviewers_block': {'reviewers_input': {'value': None}}
+            }
+        }
+    }
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "$LONG_TITLE_PAYLOAD")
+assert_contains "Long title returns validation error" "$RESP" "200 characters"
 
 # ------------------------------------------------------------------
 echo ""
