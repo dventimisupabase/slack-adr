@@ -14,7 +14,13 @@ features:
       usage_hint: "start | list | view <id> | search <q> | history <id> | stats | export <id> | accept <id> [reason] | delete <id> | help"
 
 oauth_config:
+  redirect_urls:
+    - https://afbrlhmplbkkqkjfwdjp.supabase.co/auth/v1/callback
   scopes:
+    user:
+      - openid
+      - email
+      - profile
     bot:
       - chat:write
       - commands

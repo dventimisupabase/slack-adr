@@ -39,7 +39,6 @@ async function initAuth() {
     });
   } catch (e) {
     console.error('init error:', e);
-    showApp({ email: 'fallback', id: 'fallback' });
   }
 }
 
