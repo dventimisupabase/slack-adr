@@ -637,6 +637,31 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr help includes history" "$RESP" "history"
 
 # ------------------------------------------------------------------
+echo "--- Test 36: /adr delete via slack-proxy ---"
+# Create a draft ADR to delete
+DELETE_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT (create_adr('T_SMOKE', 'C_SMOKE', 'U_SMOKE', 'Delete Me ADR', 'ctx')).id;" 2>/dev/null | tr -d ' \n')
+BODY="command=%2Fadr&text=delete+${DELETE_ADR_ID}&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_del"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr delete confirms deletion" "$RESP" "Deleted"
+
+# Verify it's gone
+DELETED_CHECK=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT count(*) FROM adrs WHERE id = '$DELETE_ADR_ID';" 2>/dev/null | tr -d ' \n')
+if [ "$DELETED_CHECK" = "0" ]; then
+  echo "  PASS: Deleted ADR no longer exists in database"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: Deleted ADR still exists (count=$DELETED_CHECK)"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 if [ "$FAIL" -gt 0 ]; then
