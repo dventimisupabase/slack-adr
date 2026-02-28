@@ -8,7 +8,7 @@
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const slackBotToken = Deno.env.get("SLACK_BOT_TOKEN") ?? "";
-const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const geminiApiKey = Deno.env.get("GEMINI_API_KEY") ?? "";
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -239,8 +239,8 @@ async function fetchThreadMessages(
 async function summarizeThread(
   messages: Array<{ user: string; text: string; ts: string }>,
 ): Promise<Record<string, string>> {
-  if (!anthropicApiKey) {
-    console.warn("ANTHROPIC_API_KEY not set — skipping thread summarization");
+  if (!geminiApiKey) {
+    console.warn("GEMINI_API_KEY not set — skipping thread summarization");
     return {};
   }
   try {
@@ -248,42 +248,50 @@ async function summarizeThread(
       .map((m) => `<${m.user}>: ${m.text}`)
       .join("\n");
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicApiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        system:
-          "You extract structured Architecture Decision Record (ADR) fields from Slack conversations. " +
-          "Return ONLY valid JSON with these keys: title, context_text, decision, alternatives, consequences, open_questions, decision_drivers, implementation_plan. " +
-          "Each value is a string. Leave a field as an empty string if it cannot be inferred from the conversation. " +
-          "Be concise but capture the key points. Do not invent information not present in the conversation.",
-        messages: [
-          {
-            role: "user",
-            content:
-              "Extract ADR fields from this Slack thread:\n\n" + threadText,
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text:
+                  "You extract structured Architecture Decision Record (ADR) fields from Slack conversations. " +
+                  "Return ONLY valid JSON with these keys: title, context_text, decision, alternatives, consequences, open_questions, decision_drivers, implementation_plan. " +
+                  "Each value is a string. Leave a field as an empty string if it cannot be inferred from the conversation. " +
+                  "Be concise but capture the key points. Do not invent information not present in the conversation.",
+              },
+            ],
           },
-        ],
-      }),
-    });
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "Extract ADR fields from this Slack thread:\n\n" +
+                    threadText,
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    );
 
     if (!resp.ok) {
-      console.error("Claude API error:", resp.status, await resp.text());
+      console.error("Gemini API error:", resp.status, await resp.text());
       return {};
     }
 
     const result = await resp.json();
-    const text = result.content?.[0]?.text ?? "";
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     // Extract JSON from response (may be wrapped in markdown code block)
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error("Claude response contained no JSON:", text);
+      console.error("Gemini response contained no JSON:", text);
       return {};
     }
     const parsed = JSON.parse(jsonMatch[0]);
@@ -409,6 +417,7 @@ Deno.serve(async (req: Request) => {
           const viewId = openResult.view?.id;
 
           // Step 2: Background — fetch thread, summarize with AI, update modal
+          // Use waitUntil to keep the edge function alive after response is sent
           if (viewId && threadTs) {
             const bgWork = (async () => {
               try {
@@ -435,6 +444,8 @@ Deno.serve(async (req: Request) => {
                 console.error("Background thread summarization failed:", err);
               }
             })();
+            // deno-lint-ignore no-explicit-any
+            (globalThis as any).EdgeRuntime?.waitUntil?.(bgWork);
             bgWork.catch((err) => console.error("Unhandled bgWork error:", err));
           }
 

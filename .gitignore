@@ -21,3 +21,4 @@ www/config.js
 .DS_Store
 Thumbs.db
 setup-vault-secrets.sql
+.vercel
