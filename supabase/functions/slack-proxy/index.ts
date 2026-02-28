@@ -5,9 +5,16 @@
 //   2. Interactive payloads (view_submission, block_actions) — forward to PostgREST RPCs
 //   3. Default (slash commands) — forward raw body to PostgREST RPC
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const slackBotToken = Deno.env.get("SLACK_BOT_TOKEN")!;
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const slackBotToken = Deno.env.get("SLACK_BOT_TOKEN") ?? "";
+
+if (!supabaseUrl || !serviceRoleKey) {
+  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+}
+if (!slackBotToken) {
+  console.warn("SLACK_BOT_TOKEN not set — modal opening will fail");
+}
 
 function rpcHeaders(req: Request): Record<string, string> {
   return {

@@ -3,12 +3,18 @@
 // Called by the outbox processor via pg_net.
 // Creates branch, commits markdown file, opens PR, calls back to PostgREST.
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const githubToken = Deno.env.get("GITHUB_TOKEN")!;
-const repoOwner = Deno.env.get("GITHUB_REPO_OWNER")!;
-const repoName = Deno.env.get("GITHUB_REPO_NAME")!;
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const githubToken = Deno.env.get("GITHUB_TOKEN") ?? "";
+const repoOwner = Deno.env.get("GITHUB_REPO_OWNER") ?? "";
+const repoName = Deno.env.get("GITHUB_REPO_NAME") ?? "";
 const defaultBranch = Deno.env.get("GITHUB_DEFAULT_BRANCH") ?? "main";
+
+if (!supabaseUrl || !serviceRoleKey || !githubToken || !repoOwner || !repoName) {
+  console.error(
+    "Missing required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GITHUB_TOKEN, GITHUB_REPO_OWNER, GITHUB_REPO_NAME",
+  );
+}
 
 const githubApi = "https://api.github.com";
 const GITHUB_TIMEOUT_MS = 30_000;

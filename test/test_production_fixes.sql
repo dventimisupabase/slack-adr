@@ -44,6 +44,9 @@ DECLARE
 BEGIN
   rec := create_adr('T_PF2', 'C_PF2', 'U_PF2', 'Thread TS capture test', 'ctx');
 
+  -- Clear other outbox rows so LIMIT 20 doesn't prevent reaching our test row
+  UPDATE adrs SET slack_message_ts = 'X' WHERE id != rec.id AND slack_message_ts IS NULL;
+
   -- Simulate a delivered outbox row with response available
   INSERT INTO adr_outbox (adr_id, destination, payload, pg_net_request_id, attempts, delivered_at)
   VALUES (rec.id, 'slack', '{"channel":"C_PF2","text":"test"}'::jsonb, -901, 1, now())
