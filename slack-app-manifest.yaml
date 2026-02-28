@@ -11,7 +11,7 @@ features:
     - command: /adr
       url: https://<PROJECT_REF>.supabase.co/functions/v1/slack-proxy
       description: Create or manage ADRs
-      usage_hint: "start | list [state] | view <id> | search <query> | stats | export <id> | accept <id> | help"
+      usage_hint: "start | list | view <id> | search <q> | history <id> | stats | export <id> | accept <id> | help"
 
 oauth_config:
   scopes:

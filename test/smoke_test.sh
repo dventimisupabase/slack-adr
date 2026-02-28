@@ -611,6 +611,32 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr help includes export" "$RESP" "export"
 
 # ------------------------------------------------------------------
+echo "--- Test 34: /adr history via slack-proxy ---"
+# Use an ADR created earlier in the smoke test (from Test 12's modal submission)
+HISTORY_ADR_ID=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT id FROM adrs WHERE team_id = 'T_SMOKE' ORDER BY created_at LIMIT 1;" 2>/dev/null | tr -d ' \n')
+BODY="command=%2Fadr&text=history+${HISTORY_ADR_ID}&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_hist"
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr history shows events" "$RESP" "ADR_CREATED"
+assert_contains "/adr history shows history header" "$RESP" "History for"
+
+# ------------------------------------------------------------------
+echo "--- Test 35: /adr help includes history command ---"
+BODY='command=%2Fadr&text=help&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_helphist'
+read -r TS SIG <<< "$(sign_request "$BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$BODY")
+assert_contains "/adr help includes history" "$RESP" "history"
+
+# ------------------------------------------------------------------
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 if [ "$FAIL" -gt 0 ]; then
