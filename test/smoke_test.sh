@@ -744,7 +744,32 @@ else
 fi
 
 # ------------------------------------------------------------------
-echo "--- Test 41: /adr help includes reason syntax ---"
+echo "--- Test 41: start_adr_from_mention block action returns 200 ---"
+# Simulates clicking "Start ADR" button from an @mention.
+# In local dev (no real Slack token), views.open will fail gracefully;
+# the handler still returns 200 (error is returned as ephemeral JSON).
+MENTION_ACTION_FORM=$(python3 -c "
+import json, urllib.parse
+payload = {
+    'type': 'block_actions',
+    'team': {'id': 'T_SMOKE'},
+    'user': {'id': 'U_MENTIONER'},
+    'actions': [{'action_id': 'start_adr_from_mention', 'value': 'C_SMOKE|9999999999.000'}],
+    'channel': {'id': 'C_SMOKE'},
+    'trigger_id': 'trig_mention_start'
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+read -r TS SIG <<< "$(sign_request "$MENTION_ACTION_FORM")"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$MENTION_ACTION_FORM")
+assert_status "start_adr_from_mention returns 200" "$STATUS" "200"
+
+# ------------------------------------------------------------------
+echo "--- Test 42: /adr help includes reason syntax ---"
 BODY='command=%2Fadr&text=help&team_id=T_SMOKE&channel_id=C_SMOKE&user_id=U_SMOKE&trigger_id=trig_helpreason'
 read -r TS SIG <<< "$(sign_request "$BODY")"
 RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \

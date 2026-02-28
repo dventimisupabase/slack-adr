@@ -8,6 +8,7 @@
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const slackBotToken = Deno.env.get("SLACK_BOT_TOKEN") ?? "";
+const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -203,6 +204,113 @@ async function fetchAdrPrefill(adrId: string): Promise<Record<string, string>> {
   }
 }
 
+async function fetchThreadMessages(
+  channelId: string,
+  threadTs: string,
+): Promise<Array<{ user: string; text: string; ts: string }>> {
+  try {
+    const resp = await fetch(
+      `https://slack.com/api/conversations.replies?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}&limit=200`,
+      {
+        headers: { Authorization: `Bearer ${slackBotToken}` },
+      },
+    );
+    const result = await resp.json();
+    if (!result.ok) {
+      console.error("conversations.replies failed:", result.error);
+      return [];
+    }
+    return (result.messages ?? [])
+      .filter(
+        (m: Record<string, unknown>) =>
+          !m.bot_id && !m.subtype && typeof m.text === "string" && (m.text as string).trim() !== "",
+      )
+      .map((m: Record<string, unknown>) => ({
+        user: (m.user as string) ?? "unknown",
+        text: m.text as string,
+        ts: (m.ts as string) ?? "",
+      }));
+  } catch (err) {
+    console.error("fetchThreadMessages error:", err);
+    return [];
+  }
+}
+
+async function summarizeThread(
+  messages: Array<{ user: string; text: string; ts: string }>,
+): Promise<Record<string, string>> {
+  if (!anthropicApiKey) {
+    console.warn("ANTHROPIC_API_KEY not set — skipping thread summarization");
+    return {};
+  }
+  try {
+    const threadText = messages
+      .map((m) => `<${m.user}>: ${m.text}`)
+      .join("\n");
+
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        system:
+          "You extract structured Architecture Decision Record (ADR) fields from Slack conversations. " +
+          "Return ONLY valid JSON with these keys: title, context_text, decision, alternatives, consequences, open_questions, decision_drivers, implementation_plan. " +
+          "Each value is a string. Leave a field as an empty string if it cannot be inferred from the conversation. " +
+          "Be concise but capture the key points. Do not invent information not present in the conversation.",
+        messages: [
+          {
+            role: "user",
+            content:
+              "Extract ADR fields from this Slack thread:\n\n" + threadText,
+          },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      console.error("Claude API error:", resp.status, await resp.text());
+      return {};
+    }
+
+    const result = await resp.json();
+    const text = result.content?.[0]?.text ?? "";
+    // Extract JSON from response (may be wrapped in markdown code block)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("Claude response contained no JSON:", text);
+      return {};
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    // Only keep string values for known fields
+    const fields = [
+      "title",
+      "context_text",
+      "decision",
+      "alternatives",
+      "consequences",
+      "open_questions",
+      "decision_drivers",
+      "implementation_plan",
+    ];
+    const prefill: Record<string, string> = {};
+    for (const f of fields) {
+      if (typeof parsed[f] === "string" && parsed[f].trim() !== "") {
+        prefill[f] = parsed[f];
+      }
+    }
+    return prefill;
+  } catch (err) {
+    console.error("summarizeThread error:", err);
+    return {};
+  }
+}
+
 Deno.serve(async (req: Request) => {
   try {
     const body = await req.text();
@@ -275,7 +383,62 @@ Deno.serve(async (req: Request) => {
         if (actionId === "start_adr_from_mention") {
           const triggerId = payload.trigger_id;
           const [channelId, threadTs] = (action.value ?? "|").split("|");
-          return await openModal(triggerId, channelId, threadTs);
+
+          // Step 1: Open modal immediately (blank) to beat the 3s trigger_id deadline
+          const view = buildModalView(channelId, threadTs);
+          const openResp = await fetch("https://slack.com/api/views.open", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${slackBotToken}`,
+            },
+            body: JSON.stringify({ trigger_id: triggerId, view }),
+          });
+          const openResult = await openResp.json();
+          if (!openResult.ok) {
+            console.error("views.open failed:", openResult);
+            return new Response(
+              JSON.stringify({
+                response_type: "ephemeral",
+                text: `Failed to open form: ${openResult.error ?? "unknown"}`,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          const viewId = openResult.view?.id;
+
+          // Step 2: Background — fetch thread, summarize with AI, update modal
+          if (viewId && threadTs) {
+            const bgWork = (async () => {
+              try {
+                const messages = await fetchThreadMessages(channelId, threadTs);
+                if (messages.length === 0) return;
+
+                const prefill = await summarizeThread(messages);
+                if (!prefill || Object.keys(prefill).length === 0) return;
+
+                const updatedView = buildModalView(channelId, threadTs, undefined, prefill);
+                const updateResp = await fetch("https://slack.com/api/views.update", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${slackBotToken}`,
+                  },
+                  body: JSON.stringify({ view_id: viewId, view: updatedView }),
+                });
+                const updateResult = await updateResp.json();
+                if (!updateResult.ok) {
+                  console.error("views.update failed:", updateResult);
+                }
+              } catch (err) {
+                console.error("Background thread summarization failed:", err);
+              }
+            })();
+            bgWork.catch((err) => console.error("Unhandled bgWork error:", err));
+          }
+
+          return new Response("", { status: 200 });
         }
 
         // Other block actions → fire-and-forget to RPC, post result to response_url
