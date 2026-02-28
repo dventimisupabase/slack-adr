@@ -104,11 +104,21 @@ async function exportToGitHub(
     existingSha = existingData.sha;
   }
 
-  // Encode UTF-8 markdown to base64 for GitHub API
+  // Validate markdown size (GitHub Contents API limit is 100MB, but keep it reasonable)
+  const MAX_MARKDOWN_BYTES = 1_000_000; // 1MB
   const bytes = new TextEncoder().encode(markdown);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  const content = btoa(binary);
+  if (bytes.length > MAX_MARKDOWN_BYTES) {
+    throw new Error(
+      `Markdown too large (${bytes.length} bytes, max ${MAX_MARKDOWN_BYTES}). Reduce ADR content and retry.`,
+    );
+  }
+
+  // Encode UTF-8 markdown to base64 for GitHub API
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 8192) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
+  }
+  const content = btoa(chunks.join(""));
 
   const createFileResp = await githubFetch(
     `/repos/${repoOwner}/${repoName}/contents/${filePath}`,
