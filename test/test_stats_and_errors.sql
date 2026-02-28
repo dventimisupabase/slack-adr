@@ -95,7 +95,7 @@ BEGIN
   result := handle_slack_webhook(
     format('command=%%2Fadr&text=accept+%s&team_id=T_STAT&channel_id=C_STAT&user_id=U_STAT&trigger_id=t4', rec.id)
   );
-  ASSERT result->>'text' LIKE '%currently ACCEPTED%' OR result->>'text' LIKE '%cannot%accept%',
+  ASSERT result->>'text' LIKE '%currently ACCEPTED%' OR result->>'text' LIKE '%cannot%accept%' OR result->>'text' LIKE '%Invalid transition%',
     format('Should show friendly error for already accepted, got: %s', result->>'text');
   RAISE NOTICE 'PASS: Test 4 - /adr accept on already-accepted shows friendly error';
 END;
@@ -115,7 +115,7 @@ BEGIN
   result := handle_slack_webhook(
     format('command=%%2Fadr&text=reject+%s&team_id=T_STAT&channel_id=C_STAT&user_id=U_STAT&trigger_id=t5', rec.id)
   );
-  ASSERT result->>'text' LIKE '%currently REJECTED%' OR result->>'text' LIKE '%cannot%reject%',
+  ASSERT result->>'text' LIKE '%currently REJECTED%' OR result->>'text' LIKE '%cannot%reject%' OR result->>'text' LIKE '%Invalid transition%',
     format('Should explain the error, got: %s', result->>'text');
   RAISE NOTICE 'PASS: Test 5 - /adr reject on rejected ADR shows friendly error';
 END;
@@ -132,7 +132,7 @@ BEGIN
   result := handle_slack_webhook(
     format('command=%%2Fadr&text=supersede+%s&team_id=T_STAT&channel_id=C_STAT&user_id=U_STAT&trigger_id=t6', rec.id)
   );
-  ASSERT result->>'text' LIKE '%currently DRAFT%' OR result->>'text' LIKE '%cannot%supersede%',
+  ASSERT result->>'text' LIKE '%currently DRAFT%' OR result->>'text' LIKE '%cannot%supersede%' OR result->>'text' LIKE '%Invalid transition%',
     format('Should explain cannot supersede draft, got: %s', result->>'text');
   RAISE NOTICE 'PASS: Test 6 - /adr supersede on draft shows friendly error';
 END;

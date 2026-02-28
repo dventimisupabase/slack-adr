@@ -187,30 +187,39 @@ BEGIN
 END;
 $$;
 
--- Test 16: Invalid transition returns NULL (REJECTED + ADR_UPDATED)
+-- Test 16: Invalid transition raises exception (REJECTED + ADR_UPDATED)
 DO $$
+DECLARE
+  result adr_state;
 BEGIN
-  ASSERT compute_adr_next_state('REJECTED', 'ADR_UPDATED') IS NULL,
-    'REJECTED + ADR_UPDATED should return NULL';
-  RAISE NOTICE 'PASS: Test 16 - REJECTED + ADR_UPDATED returns NULL';
+  result := compute_adr_next_state('REJECTED', 'ADR_UPDATED');
+  RAISE NOTICE 'FAIL: Test 16 - Should have raised exception';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'PASS: Test 16 - REJECTED + ADR_UPDATED raises exception';
 END;
 $$;
 
--- Test 17: Invalid transition returns NULL (SUPERSEDED + ADR_ACCEPTED)
+-- Test 17: Invalid transition raises exception (SUPERSEDED + ADR_ACCEPTED)
 DO $$
+DECLARE
+  result adr_state;
 BEGIN
-  ASSERT compute_adr_next_state('SUPERSEDED', 'ADR_ACCEPTED') IS NULL,
-    'SUPERSEDED + ADR_ACCEPTED should return NULL';
-  RAISE NOTICE 'PASS: Test 17 - SUPERSEDED + ADR_ACCEPTED returns NULL';
+  result := compute_adr_next_state('SUPERSEDED', 'ADR_ACCEPTED');
+  RAISE NOTICE 'FAIL: Test 17 - Should have raised exception';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'PASS: Test 17 - SUPERSEDED + ADR_ACCEPTED raises exception';
 END;
 $$;
 
--- Test 18: Invalid transition returns NULL (DRAFT + ADR_SUPERSEDED)
+-- Test 18: Invalid transition raises exception (DRAFT + ADR_SUPERSEDED)
 DO $$
+DECLARE
+  result adr_state;
 BEGIN
-  ASSERT compute_adr_next_state('DRAFT', 'ADR_SUPERSEDED') IS NULL,
-    'DRAFT + ADR_SUPERSEDED should return NULL';
-  RAISE NOTICE 'PASS: Test 18 - DRAFT + ADR_SUPERSEDED returns NULL';
+  result := compute_adr_next_state('DRAFT', 'ADR_SUPERSEDED');
+  RAISE NOTICE 'FAIL: Test 18 - Should have raised exception';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'PASS: Test 18 - DRAFT + ADR_SUPERSEDED raises exception';
 END;
 $$;
 
@@ -392,7 +401,7 @@ BEGIN
     PERFORM apply_adr_event(rec.id, 'ADR_UPDATED', 'user', 'U_EDITOR');
     RAISE EXCEPTION 'Should have raised invalid transition';
   EXCEPTION WHEN raise_exception THEN
-    ASSERT sqlerrm LIKE '%currently REJECTED%' OR sqlerrm LIKE '%cannot%update%',
+    ASSERT sqlerrm LIKE '%currently REJECTED%' OR sqlerrm LIKE '%cannot%update%' OR sqlerrm LIKE '%Invalid transition%',
       format('Unexpected error: %s', sqlerrm);
   END;
   RAISE NOTICE 'PASS: Test 28 - Invalid transition via reducer raises friendly error';

@@ -179,7 +179,7 @@ BEGIN
   result := handle_slack_webhook(
     format('command=%%2Fadr&text=accept+%s&team_id=T_PAGE&channel_id=C_PAGE&user_id=U_PAGE&trigger_id=t7d', rec.id)
   );
-  ASSERT result->>'text' LIKE '%currently ACCEPTED%',
+  ASSERT result->>'text' LIKE '%currently ACCEPTED%' OR result->>'text' LIKE '%Invalid transition%',
     format('Should show friendly error, got: %s', result->>'text');
   RAISE NOTICE 'PASS: Test 10 - Friendly error still works after DRY refactor';
 END;

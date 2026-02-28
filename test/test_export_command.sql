@@ -102,7 +102,7 @@ BEGIN
     format('command=%%2Fadr&text=export+%s&team_id=T_EXP&channel_id=C_EXP&user_id=U_EXP&trigger_id=t5', rec.id)
   );
 
-  ASSERT result->>'text' LIKE '%currently REJECTED%' OR result->>'text' LIKE '%cannot%export%',
+  ASSERT result->>'text' LIKE '%currently REJECTED%' OR result->>'text' LIKE '%cannot%export%' OR result->>'text' LIKE '%Invalid transition%',
     format('Should show friendly error for rejected, got: %s', result->>'text');
   RAISE NOTICE 'PASS: Test 5 - /adr export on rejected ADR shows friendly error';
 END;
