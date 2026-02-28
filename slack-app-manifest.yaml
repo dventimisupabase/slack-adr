@@ -9,7 +9,7 @@ features:
     always_online: true
   slash_commands:
     - command: /adr
-      url: https://<PROJECT_REF>.supabase.co/functions/v1/slack-proxy
+      url: https://afbrlhmplbkkqkjfwdjp.supabase.co/functions/v1/slack-proxy
       description: Create or manage ADRs
       usage_hint: "start | list | view <id> | search <q> | history <id> | stats | export <id> | accept <id> [reason] | delete <id> | help"
 
@@ -24,10 +24,10 @@ oauth_config:
 
 settings:
   event_subscriptions:
-    request_url: https://<PROJECT_REF>.supabase.co/functions/v1/event-proxy
+    request_url: https://afbrlhmplbkkqkjfwdjp.supabase.co/functions/v1/event-proxy
     bot_events:
       - app_mention
   interactivity:
     is_enabled: true
-    request_url: https://<PROJECT_REF>.supabase.co/functions/v1/slack-proxy
+    request_url: https://afbrlhmplbkkqkjfwdjp.supabase.co/functions/v1/slack-proxy
   socket_mode_enabled: false
