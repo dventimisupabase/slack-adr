@@ -27,6 +27,8 @@ oauth_config:
       - app_mentions:read
       - channels:history
       - groups:history
+      - canvases:write
+      - canvases:read
 
 settings:
   event_subscriptions:

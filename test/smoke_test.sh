@@ -780,6 +780,76 @@ RESP=$(curl -s -X POST "$BASE_URL/functions/v1/slack-proxy" \
 assert_contains "/adr help shows reason syntax" "$RESP" "reason"
 
 # ------------------------------------------------------------------
+echo "--- Test 43: draft_adr_canvas block action returns 200 ---"
+CANVAS_DRAFT_FORM=$(python3 -c "
+import json, urllib.parse
+payload = {
+    'type': 'block_actions',
+    'team': {'id': 'T_SMOKE'},
+    'user': {'id': 'U_CANVAS_DRAFTER'},
+    'actions': [{'action_id': 'draft_adr_canvas', 'value': 'C_SMOKE|9999999999.000'}],
+    'channel': {'id': 'C_SMOKE'},
+    'trigger_id': 'trig_canvas_draft'
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+read -r TS SIG <<< "$(sign_request "$CANVAS_DRAFT_FORM")"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$CANVAS_DRAFT_FORM")
+assert_status "draft_adr_canvas returns 200" "$STATUS" "200"
+
+# ------------------------------------------------------------------
+echo "--- Test 44: finalize_adr_from_canvas block action returns 200 ---"
+CANVAS_FINALIZE_FORM=$(python3 -c "
+import json, urllib.parse
+payload = {
+    'type': 'block_actions',
+    'team': {'id': 'T_SMOKE'},
+    'user': {'id': 'U_CANVAS_FINALIZER'},
+    'actions': [{'action_id': 'finalize_adr_from_canvas', 'value': 'FCANVAS123|C_SMOKE|9999999999.000'}],
+    'channel': {'id': 'C_SMOKE'},
+    'trigger_id': 'trig_canvas_finalize'
+}
+print('payload=' + urllib.parse.quote(json.dumps(payload)))
+")
+read -r TS SIG <<< "$(sign_request "$CANVAS_FINALIZE_FORM")"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/functions/v1/slack-proxy" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$CANVAS_FINALIZE_FORM")
+assert_status "finalize_adr_from_canvas returns 200" "$STATUS" "200"
+
+# ------------------------------------------------------------------
+echo "--- Test 45: app_mention outbox contains both action_ids ---"
+# Use a fresh channel for this test
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "INSERT INTO channel_config (team_id, channel_id, enabled) VALUES ('T_SMOKE', 'C_CANVAS_SMOKE', true) ON CONFLICT ON CONSTRAINT channel_config_pkey DO NOTHING;" 2>/dev/null
+CANVAS_MENTION_BODY='{"type":"event_callback","team_id":"T_SMOKE","event_id":"Ev_CANVAS_SMOKE_001","event":{"type":"app_mention","channel":"C_CANVAS_SMOKE","ts":"7777777777.001","thread_ts":"7777777777.000","user":"U_CANVAS_MENTION","text":"<@ADR_BOT> record this"}}'
+read -r TS SIG <<< "$(sign_request "$CANVAS_MENTION_BODY")"
+RESP=$(curl -s -X POST "$BASE_URL/functions/v1/event-proxy" \
+  -H "Content-Type: application/json" \
+  -H "X-Slack-Signature: $SIG" \
+  -H "X-Slack-Request-Timestamp: $TS" \
+  -d "$CANVAS_MENTION_BODY")
+assert_contains "app_mention returns ok" "$RESP" "ok"
+# Verify outbox contains both action_ids
+OUTBOX_START=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT count(*) FROM adr_outbox WHERE destination = 'slack' AND payload->>'channel' = 'C_CANVAS_SMOKE' AND payload::text LIKE '%start_adr_from_mention%';" 2>/dev/null | tr -d ' \n')
+OUTBOX_CANVAS=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -qt -c \
+  "SELECT count(*) FROM adr_outbox WHERE destination = 'slack' AND payload->>'channel' = 'C_CANVAS_SMOKE' AND payload::text LIKE '%draft_adr_canvas%';" 2>/dev/null | tr -d ' \n')
+if [ "$OUTBOX_START" -ge 1 ] && [ "$OUTBOX_CANVAS" -ge 1 ]; then
+  echo "  PASS: app_mention outbox contains both start_adr_from_mention and draft_adr_canvas"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: Outbox missing action_ids (start=$OUTBOX_START, canvas=$OUTBOX_CANVAS)"
+  FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 if [ "$FAIL" -gt 0 ]; then

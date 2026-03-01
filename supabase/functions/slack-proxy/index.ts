@@ -1,9 +1,10 @@
 // supabase/functions/slack-proxy/index.ts
 // Thin Deno proxy for Slack slash commands, interactivity, and modal submissions.
-// Three paths:
+// Four paths:
 //   1. Modal opening (/adr start, edit_adr, start_adr_from_mention) — direct Slack API call
 //   2. Interactive payloads (view_submission, block_actions) — forward to PostgREST RPCs
-//   3. Default (slash commands) — forward raw body to PostgREST RPC
+//   3. Canvas actions (draft_adr_canvas, finalize_adr_from_canvas) — Slack Canvas API
+//   4. Default (slash commands) — forward raw body to PostgREST RPC
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -319,6 +320,204 @@ async function summarizeThread(
   }
 }
 
+// --- Canvas helpers ---
+
+const ADR_HEADINGS: Array<{ heading: string; key: string }> = [
+  { heading: "Title", key: "title" },
+  { heading: "Context", key: "context_text" },
+  { heading: "Decision", key: "decision" },
+  { heading: "Alternatives Considered", key: "alternatives" },
+  { heading: "Consequences", key: "consequences" },
+  { heading: "Open Questions", key: "open_questions" },
+  { heading: "Decision Drivers", key: "decision_drivers" },
+  { heading: "Implementation Plan", key: "implementation_plan" },
+  { heading: "Reviewers", key: "reviewers" },
+];
+
+function buildCanvasMarkdown(prefill: Record<string, string>): string {
+  return ADR_HEADINGS.map(({ heading, key }) => {
+    const value = prefill[key]?.trim() || "";
+    return `## ${heading}\n\n${value}`;
+  }).join("\n\n");
+}
+
+async function summarizeThreadForCanvas(
+  messages: Array<{ user: string; text: string; ts: string }>,
+): Promise<string> {
+  if (!geminiApiKey || messages.length === 0) {
+    return buildCanvasMarkdown({});
+  }
+  try {
+    const threadText = messages
+      .map((m) => `<${m.user}>: ${m.text}`)
+      .join("\n");
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text:
+                  "You extract structured Architecture Decision Record (ADR) fields from Slack conversations. " +
+                  "Return ONLY a markdown document with these ## headings: Title, Context, Decision, Alternatives Considered, Consequences, Open Questions, Decision Drivers, Implementation Plan, Reviewers. " +
+                  "Under each heading, write a concise paragraph (or leave blank if nothing can be inferred). " +
+                  "Do not invent information not present in the conversation.",
+              },
+            ],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "Extract ADR fields from this Slack thread into markdown:\n\n" +
+                    threadText,
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    );
+
+    if (!resp.ok) {
+      console.error("Gemini Canvas API error:", resp.status, await resp.text());
+      return buildCanvasMarkdown({});
+    }
+
+    const result = await resp.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    // If Gemini returned valid markdown with headings, use it directly
+    if (text.includes("## ")) {
+      return text;
+    }
+    return buildCanvasMarkdown({});
+  } catch (err) {
+    console.error("summarizeThreadForCanvas error:", err);
+    return buildCanvasMarkdown({});
+  }
+}
+
+async function createCanvas(
+  markdown: string,
+  title: string,
+): Promise<string | null> {
+  try {
+    const resp = await fetch("https://slack.com/api/canvases.create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${slackBotToken}`,
+      },
+      body: JSON.stringify({
+        title: `ADR Draft: ${title}`,
+        document_content: { type: "markdown", markdown },
+      }),
+    });
+    const result = await resp.json();
+    if (!result.ok) {
+      console.error("canvases.create failed:", result.error);
+      return null;
+    }
+    return result.canvas_id ?? null;
+  } catch (err) {
+    console.error("createCanvas error:", err);
+    return null;
+  }
+}
+
+async function grantCanvasAccess(
+  canvasId: string,
+  channelId: string,
+): Promise<boolean> {
+  try {
+    const resp = await fetch("https://slack.com/api/canvases.access.set", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${slackBotToken}`,
+      },
+      body: JSON.stringify({
+        canvas_id: canvasId,
+        access_level: "can_edit",
+        channel_ids: [channelId],
+      }),
+    });
+    const result = await resp.json();
+    if (!result.ok) {
+      console.error("canvases.access.set failed:", result.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("grantCanvasAccess error:", err);
+    return false;
+  }
+}
+
+async function readCanvasContent(
+  canvasId: string,
+): Promise<string> {
+  try {
+    const resp = await fetch("https://slack.com/api/canvases.sections.lookup", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${slackBotToken}`,
+      },
+      body: JSON.stringify({
+        canvas_id: canvasId,
+        criteria: { contains_text: "" },
+      }),
+    });
+    const result = await resp.json();
+    if (!result.ok) {
+      console.error("canvases.sections.lookup failed:", result.error);
+      return "";
+    }
+    // Concatenate all section markdown content
+    const sections = result.sections ?? [];
+    return sections
+      .map((s: Record<string, unknown>) => (s as Record<string, string>).markdown ?? "")
+      .join("\n");
+  } catch (err) {
+    console.error("readCanvasContent error:", err);
+    return "";
+  }
+}
+
+function parseCanvasMarkdown(
+  markdown: string,
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  // Normalize heading aliases to ADR field keys
+  const headingMap: Record<string, string> = {};
+  for (const { heading, key } of ADR_HEADINGS) {
+    headingMap[heading.toLowerCase()] = key;
+  }
+  // Also accept common variations
+  headingMap["alternatives"] = "alternatives";
+  headingMap["context"] = "context_text";
+
+  const sections = markdown.split(/^## /m).filter(Boolean);
+  for (const section of sections) {
+    const newlineIdx = section.indexOf("\n");
+    if (newlineIdx === -1) continue;
+    const heading = section.substring(0, newlineIdx).trim().toLowerCase();
+    const body = section.substring(newlineIdx + 1).trim();
+    const key = headingMap[heading];
+    if (key && body) {
+      fields[key] = body;
+    }
+  }
+  return fields;
+}
+
 Deno.serve(async (req: Request) => {
   try {
     const body = await req.text();
@@ -449,6 +648,254 @@ Deno.serve(async (req: Request) => {
             bgWork.catch((err) => console.error("Unhandled bgWork error:", err));
           }
 
+          return new Response("", { status: 200 });
+        }
+
+        // Canvas draft action — no modal needed, all background work
+        if (actionId === "draft_adr_canvas") {
+          const [channelId, threadTs] = (action.value ?? "|").split("|");
+
+          const bgWork = (async () => {
+            try {
+              // Fetch thread messages and summarize to markdown
+              const messages = await fetchThreadMessages(channelId, threadTs);
+              const markdown = await summarizeThreadForCanvas(messages);
+
+              // Extract title from markdown for Canvas name
+              const titleMatch = markdown.match(/^## Title\n\n(.+)/m);
+              const canvasTitle = titleMatch?.[1]?.trim() || "Untitled";
+
+              // Create Canvas
+              const canvasId = await createCanvas(markdown, canvasTitle);
+              if (!canvasId) {
+                if (responseUrl) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "Failed to create Canvas. Try the *Start ADR* button instead.",
+                    }),
+                  });
+                }
+                return;
+              }
+
+              // Grant channel edit access
+              await grantCanvasAccess(canvasId, channelId);
+
+              // Post Canvas link + Finalize button in thread
+              const postBody = {
+                channel: channelId,
+                thread_ts: threadTs,
+                text: `Draft your ADR collaboratively in this Canvas, then click *Finalize ADR* when ready.`,
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: `Draft your ADR collaboratively in this Canvas, then click *Finalize ADR* when ready.\n\n<https://slack.com/docs/canvas/${canvasId}|Open Canvas>`,
+                    },
+                  },
+                  {
+                    type: "actions",
+                    elements: [
+                      {
+                        type: "button",
+                        text: { type: "plain_text", text: "Finalize ADR" },
+                        action_id: "finalize_adr_from_canvas",
+                        value: `${canvasId}|${channelId}|${threadTs}`,
+                        style: "primary",
+                      },
+                    ],
+                  },
+                ],
+              };
+
+              await fetch("https://slack.com/api/chat.postMessage", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${slackBotToken}`,
+                },
+                body: JSON.stringify(postBody),
+              });
+            } catch (err) {
+              console.error("draft_adr_canvas background error:", err);
+              if (responseUrl) {
+                try {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "Something went wrong creating the Canvas. Try the *Start ADR* button instead.",
+                    }),
+                  });
+                } catch { /* last resort */ }
+              }
+            }
+          })();
+
+          // deno-lint-ignore no-explicit-any
+          (globalThis as any).EdgeRuntime?.waitUntil?.(bgWork);
+          bgWork.catch((err) => console.error("Unhandled draft_adr_canvas error:", err));
+          return new Response("", { status: 200 });
+        }
+
+        // Finalize ADR from Canvas — read Canvas content and create ADR
+        if (actionId === "finalize_adr_from_canvas") {
+          const parts = (action.value ?? "||").split("|");
+          const canvasId = parts[0];
+          const channelId = parts[1];
+          const threadTs = parts[2];
+
+          const bgWork = (async () => {
+            try {
+              // Read Canvas content
+              const markdown = await readCanvasContent(canvasId);
+              if (!markdown) {
+                if (responseUrl) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "Could not read Canvas content. Please try again.",
+                    }),
+                  });
+                }
+                return;
+              }
+
+              // Parse markdown into ADR fields
+              const fields = parseCanvasMarkdown(markdown);
+
+              // Validate required fields
+              const missing: string[] = [];
+              if (!fields.title?.trim()) missing.push("Title");
+              if (!fields.context_text?.trim()) missing.push("Context");
+
+              if (missing.length > 0) {
+                if (responseUrl) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: `Missing required fields: *${missing.join("*, *")}*. Please fill them in the Canvas and try again.`,
+                    }),
+                  });
+                }
+                return;
+              }
+
+              // Look up team_id from channel_config
+              const configResp = await fetch(
+                `${supabaseUrl}/rest/v1/channel_config?channel_id=eq.${encodeURIComponent(channelId)}&select=team_id&limit=1`,
+                {
+                  headers: {
+                    apikey: serviceRoleKey,
+                    Authorization: `Bearer ${serviceRoleKey}`,
+                  },
+                },
+              );
+              const configRows = await configResp.json();
+              const teamId = configRows?.[0]?.team_id;
+
+              if (!teamId) {
+                if (responseUrl) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "ADR Bot is not enabled in this channel. Run `/adr enable` first.",
+                    }),
+                  });
+                }
+                return;
+              }
+
+              // Create ADR via RPC
+              const userId = payload.user?.id ?? "unknown";
+              const createResp = await fetch(
+                `${supabaseUrl}/rest/v1/rpc/create_adr`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    apikey: serviceRoleKey,
+                    Authorization: `Bearer ${serviceRoleKey}`,
+                  },
+                  body: JSON.stringify({
+                    p_team_id: teamId,
+                    p_channel_id: channelId,
+                    p_created_by: userId,
+                    p_title: fields.title,
+                    p_context_text: fields.context_text,
+                    p_thread_ts: threadTs || null,
+                    p_decision: fields.decision || null,
+                    p_alternatives: fields.alternatives || null,
+                    p_consequences: fields.consequences || null,
+                    p_open_questions: fields.open_questions || null,
+                    p_decision_drivers: fields.decision_drivers || null,
+                    p_implementation_plan: fields.implementation_plan || null,
+                    p_reviewers: fields.reviewers || null,
+                  }),
+                },
+              );
+
+              if (!createResp.ok) {
+                const errText = await createResp.text();
+                console.error("create_adr RPC failed:", createResp.status, errText);
+                if (responseUrl) {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "Failed to create ADR. Please try again.",
+                    }),
+                  });
+                }
+                return;
+              }
+
+              const adr = await createResp.json();
+              const adrId = adr?.id ?? "unknown";
+
+              // Post confirmation in thread
+              if (responseUrl) {
+                await fetch(responseUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    replace_original: false,
+                    text: `ADR *${adrId}: ${fields.title}* created from Canvas. Use \`/adr view ${adrId}\` to see it.`,
+                  }),
+                });
+              }
+            } catch (err) {
+              console.error("finalize_adr_from_canvas background error:", err);
+              if (responseUrl) {
+                try {
+                  await fetch(responseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      replace_original: false,
+                      text: "Something went wrong finalizing the ADR. Please try again.",
+                    }),
+                  });
+                } catch { /* last resort */ }
+              }
+            }
+          })();
+
+          // deno-lint-ignore no-explicit-any
+          (globalThis as any).EdgeRuntime?.waitUntil?.(bgWork);
+          bgWork.catch((err) => console.error("Unhandled finalize_adr_from_canvas error:", err));
           return new Response("", { status: 200 });
         }
 
